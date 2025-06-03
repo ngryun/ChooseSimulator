@@ -156,21 +156,17 @@ class CourseSimulatorGenerator:
                     group_name, limit = self.parse_group_limits(selection_info)
                     
                     if group_name and limit:
-                        semester = str(row.get(available_columns['semester'], ''))
-                        group = str(row.get(available_columns['group'], ''))
-                        key = f"{semester}_{group}_{group_name}"
-                        
+                        key = group_name
+
                         if key not in self.group_limits:
                             self.group_limits[key] = {
-                                'semester': semester,
-                                'group': group,
                                 'group_name': group_name,
                                 'limit': limit
                             }
                 
                 print(f"🎯 그룹별 선택 제한 정보: {len(self.group_limits)}개")
                 for key, info in self.group_limits.items():
-                    print(f"   - {info['semester']} / {info['group']} / {info['group_name']}: 최대 {info['limit']}개 선택")
+                    print(f"   - {info['group_name']}: 최대 {info['limit']}개 선택")
             
             print(f"✅ 데이터 처리 완료: {len(self.df)}개 과목")
             return True
@@ -801,14 +797,12 @@ class CourseSimulatorGenerator:
 
         function initializeSelectionGroups() {{
             selectionGroups = {{}};
-            
+
             courseData.forEach(course => {{
                 if (course.selection_group && course.selection_limit) {{
-                    const key = `${{course.semester}}_${{course.group}}_${{course.selection_group}}`;
+                    const key = course.selection_group;
                     if (!selectionGroups[key]) {{
                         selectionGroups[key] = {{
-                            semester: course.semester,
-                            group: course.group,
                             name: course.selection_group,
                             limit: course.selection_limit,
                             selected: []
@@ -892,6 +886,9 @@ class CourseSimulatorGenerator:
                             const groupSection = document.createElement('div');
                             groupSection.className = `selection-group ${{hasLimit ? 'has-limit' : ''}}`;
                             groupSection.id = `group-${{semester}}-${{group}}-${{selectionGroupKey}}`;
+                            groupSection.dataset.semester = semester;
+                            groupSection.dataset.group = group;
+                            groupSection.dataset.selectionGroup = selectionGroupKey;
                             
                             let titleContent = `🎯 ${{group}} 선택과목`;
                             if (hasLimit) {{
@@ -917,16 +914,18 @@ class CourseSimulatorGenerator:
                 // 선택 제한 그룹에 지정과목 반영
                 requiredCourses.forEach(course => {{
                     if (course.selection_group && course.selection_limit) {{
-                        const key = `${{semester}}_${{course.group}}_${{course.selection_group}}`;
+                        const key = course.selection_group;
                         if (selectionGroups[key] && !selectionGroups[key].selected.find(c => c.name === course.name)) {{
                             selectionGroups[key].selected.push(course);
                         }}
                     }}
                 }});
             }});
+            // 초기 선택 제한 업데이트
             Object.keys(selectionGroups).forEach(key => {{
-                const info = selectionGroups[key];
-                updateSelectionLimit(info.semester, info.group, info.name);
+                document.querySelectorAll(`[data-selection-group="${{key}}"]`).forEach(el => {{
+                    updateSelectionLimit(el.dataset.semester, el.dataset.group, key);
+                }});
             }});
         }}
 
@@ -1016,7 +1015,7 @@ class CourseSimulatorGenerator:
             // 선택 제한 확인
             let isDisabled = false;
             if (!isRequired && course.selection_group && course.selection_limit) {{
-                const groupKey = `${{semester}}_${{course.group}}_${{course.selection_group}}`;
+                const groupKey = course.selection_group;
                 const groupInfo = selectionGroups[groupKey];
                 if (groupInfo && groupInfo.selected.length >= groupInfo.limit && !isSelected) {{
                     isDisabled = true;
@@ -1057,9 +1056,9 @@ class CourseSimulatorGenerator:
 
             if (checkbox.checked && !isCurrentlySelected) {{
                 // 선택 제한 확인
-                if (course.selection_group && course.selection_limit) {{
-                    const groupKey = `${{semester}}_${{course.group}}_${{course.selection_group}}`;
-                    const groupInfo = selectionGroups[groupKey];
+                    if (course.selection_group && course.selection_limit) {{
+                        const groupKey = course.selection_group;
+                        const groupInfo = selectionGroups[groupKey];
                     
                     if (groupInfo && groupInfo.selected.length >= groupInfo.limit) {{
                         checkbox.checked = false;
@@ -1079,7 +1078,7 @@ class CourseSimulatorGenerator:
             }} else if (!checkbox.checked && isCurrentlySelected) {{
                 // 선택 그룹에서 제거
                 if (course.selection_group && course.selection_limit) {{
-                    const groupKey = `${{semester}}_${{course.group}}_${{course.selection_group}}`;
+                    const groupKey = course.selection_group;
                     const groupInfo = selectionGroups[groupKey];
                     
                     if (groupInfo) {{
@@ -1103,7 +1102,7 @@ class CourseSimulatorGenerator:
         }}
 
         function updateSelectionLimit(semester, group, selectionGroup) {{
-            const groupKey = `${{semester}}_${{group}}_${{selectionGroup}}`;
+            const groupKey = selectionGroup;
             const groupInfo = selectionGroups[groupKey];
             
             if (!groupInfo) return;
