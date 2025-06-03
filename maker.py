@@ -800,7 +800,7 @@ class CourseSimulatorGenerator:
 
             courseData.forEach(course => {{
                 if (course.selection_group && course.selection_limit) {{
-                    const key = course.selection_group;
+                    const key = `${{course.semester}}-${{course.selection_group}}`;
                     if (!selectionGroups[key]) {{
                         selectionGroups[key] = {{
                             name: course.selection_group,
@@ -872,7 +872,7 @@ class CourseSimulatorGenerator:
                         // 선택 그룹별로 분리
                         const selectionGroupMap = {{}};
                         groupCourses.forEach(course => {{
-                            const groupKey = course.selection_group || 'default';
+                            const groupKey = course.selection_group ? `${{semester}}-${{course.selection_group}}` : 'default';
                             if (!selectionGroupMap[groupKey]) {{
                                 selectionGroupMap[groupKey] = [];
                             }}
@@ -914,7 +914,7 @@ class CourseSimulatorGenerator:
                 // 선택 제한 그룹에 지정과목 반영
                 requiredCourses.forEach(course => {{
                     if (course.selection_group && course.selection_limit) {{
-                        const key = course.selection_group;
+                        const key = `${{semester}}-${{course.selection_group}}`;
                         if (selectionGroups[key] && !selectionGroups[key].selected.find(c => c.name === course.name)) {{
                             selectionGroups[key].selected.push(course);
                         }}
@@ -972,13 +972,13 @@ class CourseSimulatorGenerator:
                 
                 // 선택 그룹별로 분리
                 const selectionGroupMap = {{}};
-                groupCourses.forEach(course => {{
-                    const groupKey = course.selection_group || 'default';
-                    if (!selectionGroupMap[groupKey]) {{
+                groupCourses.forEach(course => {
+                    const groupKey = course.selection_group ? `${semester}-${course.selection_group}` : 'default';
+                    if (!selectionGroupMap[groupKey]) {
                         selectionGroupMap[groupKey] = [];
-                    }}
+                    }
                     selectionGroupMap[groupKey].push(course);
-                }});
+                });
 
                 Object.keys(selectionGroupMap).forEach(selectionGroupKey => {{
                     const courses = selectionGroupMap[selectionGroupKey];
@@ -1015,7 +1015,7 @@ class CourseSimulatorGenerator:
             // 선택 제한 확인
             let isDisabled = false;
             if (!isRequired && course.selection_group && course.selection_limit) {{
-                const groupKey = course.selection_group;
+                const groupKey = `${{semester}}-${{course.selection_group}}`;
                 const groupInfo = selectionGroups[groupKey];
                 if (groupInfo && groupInfo.selected.length >= groupInfo.limit && !isSelected) {{
                     isDisabled = true;
@@ -1057,7 +1057,7 @@ class CourseSimulatorGenerator:
             if (checkbox.checked && !isCurrentlySelected) {{
                 // 선택 제한 확인
                     if (course.selection_group && course.selection_limit) {{
-                        const groupKey = course.selection_group;
+                        const groupKey = `${{semester}}-${{course.selection_group}}`;
                         const groupInfo = selectionGroups[groupKey];
                     
                     if (groupInfo && groupInfo.selected.length >= groupInfo.limit) {{
@@ -1078,7 +1078,7 @@ class CourseSimulatorGenerator:
             }} else if (!checkbox.checked && isCurrentlySelected) {{
                 // 선택 그룹에서 제거
                 if (course.selection_group && course.selection_limit) {{
-                    const groupKey = course.selection_group;
+                    const groupKey = `${{semester}}-${{course.selection_group}}`;
                     const groupInfo = selectionGroups[groupKey];
                     
                     if (groupInfo) {{
@@ -1092,7 +1092,8 @@ class CourseSimulatorGenerator:
 
             // 선택 제한 UI 업데이트
             if (course.selection_group && course.selection_limit) {{
-                updateSelectionLimit(semester, course.group, course.selection_group);
+                const groupKey = `${{semester}}-${{course.selection_group}}`;
+                updateSelectionLimit(semester, course.group, groupKey);
             }}
 
             // 다른 과목들의 비활성화 상태 업데이트
