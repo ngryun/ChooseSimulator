@@ -799,24 +799,27 @@ class CourseSimulatorGenerator:
             }}
         }}
 
-        function initializeSelectionGroups() {{
-            selectionGroups = {{}};
-            
-            courseData.forEach(course => {{
-                if (course.selection_group && course.selection_limit) {{
-                    const key = `${{course.semester}}_${{course.group}}_${{course.selection_group}}`;
-                    if (!selectionGroups[key]) {{
-                        selectionGroups[key] = {{
-                            semester: course.semester,
-                            group: course.group,
-                            name: course.selection_group,
-                            limit: course.selection_limit,
-                            selected: []
-                        }};
-                    }}
-                }}
-            }});
+function initializeSelectionGroups() {{
+    selectionGroups = {{}};
+
+    courseData.forEach(course => {{
+        if (course.selection_group && course.selection_limit) {{
+            const key = `${{course.semester}}_${{course.selection_group}}`;
+            if (!selectionGroups[key]) {{
+                selectionGroups[key] = {{
+                    semester: course.semester,
+                    name: course.selection_group,
+                    limit: course.selection_limit,
+                    selected: [],
+                    groups: []
+                }};
+            }}
+            if (!selectionGroups[key].groups.includes(course.group)) {{
+                selectionGroups[key].groups.push(course.group);
+            }}
         }}
+    }});
+}}
 
         function generateTabs() {{
             const tabsContainer = document.getElementById('tabsContainer');
@@ -917,16 +920,21 @@ class CourseSimulatorGenerator:
                 // 선택 제한 그룹에 지정과목 반영
                 requiredCourses.forEach(course => {{
                     if (course.selection_group && course.selection_limit) {{
-                        const key = `${{semester}}_${{course.group}}_${{course.selection_group}}`;
-                        if (selectionGroups[key] && !selectionGroups[key].selected.find(c => c.name === course.name)) {{
-                            selectionGroups[key].selected.push(course);
+                        const key = `${{semester}}_${{course.selection_group}}`;
+                        if (selectionGroups[key]) {{
+                            if (!selectionGroups[key].selected.find(c => c.name === course.name)) {{
+                                selectionGroups[key].selected.push(course);
+                            }}
+                            if (!selectionGroups[key].groups.includes(course.group)) {{
+                                selectionGroups[key].groups.push(course.group);
+                            }}
                         }}
                     }}
                 }});
             }});
             Object.keys(selectionGroups).forEach(key => {{
                 const info = selectionGroups[key];
-                updateSelectionLimit(info.semester, info.group, info.name);
+                info.groups.forEach(g => updateSelectionLimit(info.semester, g, info.name));
             }});
         }}
 
@@ -1016,7 +1024,7 @@ class CourseSimulatorGenerator:
             // 선택 제한 확인
             let isDisabled = false;
             if (!isRequired && course.selection_group && course.selection_limit) {{
-                const groupKey = `${{semester}}_${{course.group}}_${{course.selection_group}}`;
+                const groupKey = `${{semester}}_${{course.selection_group}}`;
                 const groupInfo = selectionGroups[groupKey];
                 if (groupInfo && groupInfo.selected.length >= groupInfo.limit && !isSelected) {{
                     isDisabled = true;
@@ -1058,7 +1066,7 @@ class CourseSimulatorGenerator:
             if (checkbox.checked && !isCurrentlySelected) {{
                 // 선택 제한 확인
                 if (course.selection_group && course.selection_limit) {{
-                    const groupKey = `${{semester}}_${{course.group}}_${{course.selection_group}}`;
+                    const groupKey = `${{semester}}_${{course.selection_group}}`;
                     const groupInfo = selectionGroups[groupKey];
                     
                     if (groupInfo && groupInfo.selected.length >= groupInfo.limit) {{
@@ -1079,7 +1087,7 @@ class CourseSimulatorGenerator:
             }} else if (!checkbox.checked && isCurrentlySelected) {{
                 // 선택 그룹에서 제거
                 if (course.selection_group && course.selection_limit) {{
-                    const groupKey = `${{semester}}_${{course.group}}_${{course.selection_group}}`;
+                    const groupKey = `${{semester}}_${{course.selection_group}}`;
                     const groupInfo = selectionGroups[groupKey];
                     
                     if (groupInfo) {{
@@ -1103,7 +1111,7 @@ class CourseSimulatorGenerator:
         }}
 
         function updateSelectionLimit(semester, group, selectionGroup) {{
-            const groupKey = `${{semester}}_${{group}}_${{selectionGroup}}`;
+            const groupKey = `${{semester}}_${{selectionGroup}}`;
             const groupInfo = selectionGroups[groupKey];
             
             if (!groupInfo) return;
