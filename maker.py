@@ -914,6 +914,19 @@ class CourseSimulatorGenerator:
 
                 // 지정과목 자동 선택
                 selectedCourses[semester] = [...requiredCourses];
+                // 선택 제한 그룹에 지정과목 반영
+                requiredCourses.forEach(course => {{
+                    if (course.selection_group && course.selection_limit) {{
+                        const key = `${{semester}}_${{course.group}}_${{course.selection_group}}`;
+                        if (selectionGroups[key] && !selectionGroups[key].selected.find(c => c.name === course.name)) {{
+                            selectionGroups[key].selected.push(course);
+                        }}
+                    }}
+                }});
+            }});
+            Object.keys(selectionGroups).forEach(key => {{
+                const info = selectionGroups[key];
+                updateSelectionLimit(info.semester, info.group, info.name);
             }});
         }}
 
