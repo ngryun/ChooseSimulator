@@ -29,18 +29,16 @@ class CourseSimulatorGenerator:
     def __init__(self):
         self.df = None
         self.school_name = ""
-        self.group_limits = {}  # 그룹별 선택 제한 정보
+        self.group_limits = {}  # 그룹별 선택 제한 정보 (키: "학기_선택그룹명")
         self.html_template = self._get_html_template()
-    
+        self.available_columns_map = {} # 엑셀의 실제 컬럼명 매핑
+
     def select_excel_file(self):
         """엑셀 파일 선택 대화상자"""
         try:
             root = tk.Tk()
             root.withdraw()  # 메인 창 숨기기
-            
-            # macOS에서 한글 폴더 처리
             initial_dir = os.path.expanduser("~/Desktop")
-            
             file_path = filedialog.askopenfilename(
                 title="과목 데이터 엑셀 파일을 선택하세요",
                 initialdir=initial_dir,
@@ -49,209 +47,242 @@ class CourseSimulatorGenerator:
                     ("All files", "*.*")
                 ]
             )
-            
             root.destroy()
-            
-            # 경로 정규화
             if file_path:
                 file_path = os.path.normpath(file_path)
                 print(f"📁 선택된 파일: {file_path}")
-            
             return file_path
-            
         except Exception as e:
             print(f"❌ 파일 선택 중 오류: {e}")
             return None
-    
+
     def load_excel_data(self, file_path):
         """엑셀 파일 로드 및 데이터 검증"""
         try:
-            # 엑셀 파일 읽기
             if file_path.endswith('.xlsx'):
-                self.df = pd.read_excel(file_path, engine='openpyxl')
+                self.df = pd.read_excel(file_path, engine='openpyxl', dtype=str) 
             else:
-                self.df = pd.read_excel(file_path)
+                self.df = pd.read_excel(file_path, dtype=str) 
             
-            print(f"✅ 엑셀 파일 로드 완료: {len(self.df)}개 행")
-            print(f"📋 컬럼: {list(self.df.columns)}")
-            
-            # 파일명에서 학교명 추출 (선택사항)
-            filename = Path(file_path).stem
+            for col in self.df.columns:
+                if self.df[col].apply(type).eq(str).all(): 
+                     self.df[col] = self.df[col].str.strip()
+
+            print(f"✅ 엑셀 파일 로드 완료 (공백 제거 적용): {len(self.df)}개 행")
+            print(f"📋 원본 컬럼: {list(self.df.columns)}")
+
+            filename = Path(file_path).stem.strip() 
             if '고등학교' in filename or '고' in filename:
-                self.school_name = filename.split('_')[0] if '_' in filename else filename
+                self.school_name = filename.split('_')[0].strip() if '_' in filename else filename
             else:
+                self.school_name = filename if filename else "고등학교" 
+            
+            if not self.school_name: 
                 self.school_name = "고등학교"
-            
+
             return True
-            
         except Exception as e:
             print(f"❌ 엑셀 파일 로드 실패: {e}")
             return False
-    
+
     def parse_group_limits(self, selection_info):
         """그룹 내 선택수 정보 파싱"""
         if pd.isna(selection_info) or not str(selection_info).strip():
             return None, None
-        
-        selection_str = str(selection_info).strip()
-        
-        # "택{N}" 패턴 찾기
+        selection_str = str(selection_info).strip() 
         pattern = r'택(\d+)'
         match = re.search(pattern, selection_str)
-        
         if match:
             limit = int(match.group(1))
-            # 그룹명 추출 (택{N} 앞부분)
             group_name = selection_str.split('택')[0].strip()
+            if not group_name:
+                group_name = "선택그룹" 
             return group_name, limit
-        
         return None, None
-    
+
+    def _map_columns(self):
+        """표준 컬럼명과 실제 엑셀 컬럼명 매핑"""
+        standard_to_korean_map = {
+            'year': '입학년도', 'semester': '학기', 'type': '유형',
+            'name': '과목명', 'credits': '학점', 'required': '지정여부',
+            'classes': '개설반수', 'subject': '담당과목', 'period': '수업시기',
+            'group': '교과(군)', 'selection_count': '그룹 내 선택수'
+        }
+        self.available_columns_map = {}
+        if self.df is None:
+            return
+
+        self.df.columns = [col.strip() for col in self.df.columns]
+        df_columns_normalized = {unicodedata.normalize('NFC', col): col for col in self.df.columns}
+
+        for std_name, kor_default_name in standard_to_korean_map.items():
+            kor_default_name_normalized = unicodedata.normalize('NFC', kor_default_name.strip())
+            if kor_default_name_normalized in df_columns_normalized:
+                self.available_columns_map[std_name] = df_columns_normalized[kor_default_name_normalized]
+            else: 
+                 if std_name in df_columns_normalized: 
+                     self.available_columns_map[std_name] = df_columns_normalized[std_name]
+        print(f"🔍 인식된 컬럼 매핑: {self.available_columns_map}")
+
+    def get_col_name(self, standard_name):
+        return self.available_columns_map.get(standard_name)
+
     def process_data(self):
-        """데이터 처리 및 검증"""
         if self.df is None:
             return False
-        
         try:
-            # 컬럼명 정규화
-            column_mapping = {
-                '입학년도': 'year',
-                '학기': 'semester', 
-                '유형': 'type',
-                '과목명': 'name',
-                '학점': 'credits',
-                '지정여부': 'required',
-                '개설반수': 'classes',
-                '담당과목': 'subject',
-                '수업시기': 'period',
-                '교과(군)': 'group',
-                '그룹 내 선택수': 'selection_count'
-            }
-            
-            # 컬럼 매핑
-            available_columns = {}
-            for korean_col, english_col in column_mapping.items():
-                if korean_col in self.df.columns:
-                    available_columns[english_col] = korean_col
-            
-            print(f"🔍 인식된 컬럼: {available_columns}")
-            
-            # 필수 컬럼 확인
-            required_columns = ['semester', 'name', 'credits', 'required', 'group']
-            missing_columns = [col for col in required_columns if col not in available_columns]
-            
-            if missing_columns:
-                print(f"❌ 필수 컬럼 누락: {missing_columns}")
+            self._map_columns() 
+
+            required_std_cols = ['semester', 'name', 'credits', 'required', 'group']
+            missing_cols = [std_col for std_col in required_std_cols if not self.get_col_name(std_col)]
+            if missing_cols:
+                print(f"❌ 필수 컬럼 누락 (표준명 기준): {missing_cols}")
                 return False
+
+            name_col = self.get_col_name('name')
+            credits_col = self.get_col_name('credits')
             
-            # 데이터 정제
-            self.df = self.df.dropna(subset=[available_columns['name']])  # 과목명이 없는 행 제거
-            self.df['credits'] = pd.to_numeric(self.df[available_columns['credits']], errors='coerce').fillna(0)
-            
-            # 그룹별 선택 제한 정보 추출
-            if 'selection_count' in available_columns:
-                self.group_limits = {}
+            self.df = self.df.dropna(subset=[name_col])
+            self.df[credits_col] = self.df[credits_col].astype(str).str.strip()
+            self.df[credits_col] = pd.to_numeric(self.df[credits_col], errors='coerce').fillna(0)
+
+            self.group_limits = {}
+            selection_count_col = self.get_col_name('selection_count')
+            semester_col = self.get_col_name('semester')
+
+            if selection_count_col:
                 for _, row in self.df.iterrows():
-                    selection_info = row.get(available_columns['selection_count'])
-                    group_name, limit = self.parse_group_limits(selection_info)
-                    
-                    if group_name and limit:
-                        key = group_name
+                    selection_info = str(row.get(selection_count_col, '')).strip()
+                    parsed_group_name, limit = self.parse_group_limits(selection_info)
+
+                    if parsed_group_name and limit:
+                        semester = str(row.get(semester_col, '')).strip() 
+                        if not semester: continue 
+
+                        key = f"{semester}_{parsed_group_name}" # Key is based on semester and selection group name
 
                         if key not in self.group_limits:
                             self.group_limits[key] = {
-                                'group_name': group_name,
+                                'semester': semester,
+                                'group_name': parsed_group_name, # This is the "선택그룹명"
                                 'limit': limit
                             }
-                
                 print(f"🎯 그룹별 선택 제한 정보: {len(self.group_limits)}개")
                 for key, info in self.group_limits.items():
-                    print(f"   - {info['group_name']}: 최대 {info['limit']}개 선택")
-            
+                    print(f"   - {info['semester']} / '{info['group_name']}' 그룹: 최대 {info['limit']}개 선택 (Key: {key})")
+            else:
+                print("⚠️ '그룹 내 선택수' 컬럼이 없어 그룹 선택 제한 기능을 사용하지 않습니다.")
+
             print(f"✅ 데이터 처리 완료: {len(self.df)}개 과목")
             return True
-            
         except Exception as e:
             print(f"❌ 데이터 처리 실패: {e}")
             return False
-    
+
     def generate_course_data(self):
-        """과목 데이터를 JavaScript 형태로 변환"""
         try:
             course_list = []
-            
+            if self.df is None or not self.available_columns_map:
+                print("❌ 데이터프레임 또는 컬럼 매핑 정보가 없습니다.")
+                return [], []
+
+            name_col = self.get_col_name('name')
+            semester_col = self.get_col_name('semester')
+            type_col = self.get_col_name('type')
+            credits_col = self.get_col_name('credits')
+            required_col = self.get_col_name('required')
+            subject_col = self.get_col_name('subject') 
+            group_col = self.get_col_name('group') # 교과(군)
+            selection_count_col = self.get_col_name('selection_count')
+
             for _, row in self.df.iterrows():
-                # 그룹 내 선택수 정보 파싱
-                selection_info = row.get('그룹 내 선택수')
-                group_name, selection_limit = self.parse_group_limits(selection_info)
+                parsed_group_name, selection_limit = None, None
+                if selection_count_col:
+                    selection_info = str(row.get(selection_count_col, '')).strip()
+                    parsed_group_name, selection_limit = self.parse_group_limits(selection_info)
+
+                course_name_val = str(row.get(name_col, '')).strip()
+                semester_val = str(row.get(semester_col, '')).strip()
                 
+                if not course_name_val or not semester_val: 
+                    continue
+
                 course = {
-                    'semester': str(row.get('학기', '')),
-                    'type': str(row.get('유형', '')), 
-                    'name': str(row.get('과목명', '')),
-                    'credits': int(row.get('학점', 0)) if pd.notna(row.get('학점', 0)) else 0,
-                    'required': str(row.get('지정여부', '')),
-                    'subject': str(row.get('담당과목', '')),
-                    'group': str(row.get('교과(군)', '')),
-                    'selection_group': group_name if group_name else None,
-                    'selection_limit': selection_limit if selection_limit else None
+                    'semester': semester_val,
+                    'type': str(row.get(type_col, '')).strip(),
+                    'name': course_name_val,
+                    'credits': int(row.get(credits_col, 0)) if pd.notna(row.get(credits_col, 0)) else 0,
+                    'required': str(row.get(required_col, '')).strip(),
+                    'subject': str(row.get(subject_col, '')).strip(), 
+                    'group': str(row.get(group_col, '')).strip(), # 교과(군) for display
+                    'selection_group': parsed_group_name if parsed_group_name else None, # 선택그룹명
+                    'selection_limit': selection_limit if selection_limit else None     
                 }
-                
-                # 빈 값 체크
-                if course['name'] and course['semester']:
-                    course_list.append(course)
-            
+                course_list.append(course)
+
             print(f"✅ {len(course_list)}개 과목 데이터 생성")
-            
-            # 학기 목록 추출
-            semesters = sorted(list(set(course['semester'] for course in course_list)))
+            semesters = sorted(list(set(course['semester'] for course in course_list if course['semester'])))
             print(f"📅 학기 목록: {semesters}")
-            
             return course_list, semesters
-            
         except Exception as e:
             print(f"❌ 과목 데이터 생성 실패: {e}")
             return [], []
-    
+
     def generate_html(self, output_path=None):
-        """HTML 파일 생성"""
         try:
             course_data, semesters = self.generate_course_data()
-            
-            if not course_data:
-                print("❌ 생성할 과목 데이터가 없습니다.")
+            if not course_data: 
+                print("❌ 생성할 과목 데이터가 없습니다 (generate_course_data 실패).")
                 return False
-            
-            # JavaScript 데이터 생성
+
             js_course_data = json.dumps(course_data, ensure_ascii=False, indent=2)
             js_group_limits = json.dumps(self.group_limits, ensure_ascii=False, indent=2)
-            
-            # HTML 템플릿에 데이터 삽입
+
+            display_school_name = self.school_name if self.school_name else "고등학교"
+
             html_content = self.html_template.format(
-                school_name=self.school_name,
+                school_name=display_school_name,
                 course_data=js_course_data,
                 group_limits=js_group_limits
             )
+
+            final_file_path_to_use = ""
+            if output_path: 
+                final_file_path_to_use = output_path
+            else: 
+                current_school_name_for_file = self.school_name
+                safe_school_filename_part = re.sub(r'[\\/*?:"<>|\'\"]', "", current_school_name_for_file) 
+                safe_school_filename_part = re.sub(r'\s+', "_", safe_school_filename_part) 
+                safe_school_filename_part = safe_school_filename_part.strip('_') 
+                
+                if not safe_school_filename_part: 
+                    safe_school_filename_part = "학교" 
+                final_file_path_to_use = f"{safe_school_filename_part}_과목선택시뮬레이션.html"
             
-            # 출력 파일 경로 설정
-            if not output_path:
-                output_path = f"{self.school_name}_과목선택시뮬레이션.html"
-            
-            # HTML 파일 저장
-            with open(output_path, 'w', encoding='utf-8') as f:
+            output_abs_path = os.path.abspath(final_file_path_to_use)
+            os.makedirs(os.path.dirname(output_abs_path), exist_ok=True)
+
+            with open(output_abs_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
-            
-            print(f"✅ HTML 파일 생성 완료: {output_path}")
+
+            print(f"✅ HTML 파일 생성 완료: {output_abs_path}")
             print(f"📊 총 {len(course_data)}개 과목, {len(semesters)}개 학기")
-            
-            return output_path
-            
-        except Exception as e:
-            print(f"❌ HTML 생성 실패: {e}")
+            return output_abs_path
+        except KeyError as ke:
+            # This is where the error '' \n            infoText += ` | 담당'' would be caught if it's a Python format key error
+            print(f"❌ HTML 생성 중 KeyError 발생: 키 '{ke}'를 찾을 수 없습니다. HTML 템플릿의 {{...}} 사용을 확인하거나, 데이터 또는 컬럼명을 확인해주세요.")
             return False
-    
+        except OSError as oe:
+            print(f"❌ HTML 파일 저장 중 OSError 발생: {oe}. 파일 경로 또는 권한을 확인해주세요.")
+            return False
+        except Exception as e:
+            print(f"❌ HTML 생성 실패 (기타 오류): {e}")
+            return False
+
     def _get_html_template(self):
-        """모바일 최적화된 HTML 템플릿 반환"""
+        # Ensure this template string is exactly as intended.
+        # Python's .format() uses {key}. JavaScript uses ${expression}.
+        # Literal braces in CSS/JS that Python might misinterpret as placeholders should be escaped: {{ for { and }} for }.
         return '''<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -259,7 +290,7 @@ class CourseSimulatorGenerator:
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>{school_name} 과목 선택 시뮬레이션</title>
     <style>
-        * {{
+        * {{ /* CSS uses single braces, Python .format() needs these escaped if they are not for JS template literals */
             margin: 0;
             padding: 0;
             box-sizing: border-box;
@@ -380,20 +411,19 @@ class CourseSimulatorGenerator:
             color: #666;
         }}
 
-        .course-section {{
+        .course-section, .selection-group-wrapper {{ 
             margin-bottom: 25px;
         }}
-
-        .section-title {{
+        
+        .section-title {{ 
             font-size: 1.1em;
             font-weight: bold;
             color: #333;
             margin-bottom: 12px;
             padding: 8px 12px;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            background: linear-gradient(90deg, #e0e0e0, #f0f0f0); 
+            border-left: 4px solid #667eea;
+            border-radius: 4px;
         }}
 
         .course-grid {{
@@ -409,7 +439,10 @@ class CourseSimulatorGenerator:
             border-radius: 10px;
             padding: 12px;
             transition: all 0.3s ease;
-            min-height: 120px;
+            min-height: 120px; 
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
         }}
 
         .course-card:hover {{
@@ -418,12 +451,12 @@ class CourseSimulatorGenerator:
         }}
 
         .course-card.required {{
-            background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
-            border-color: #ff6b9d;
+            background: linear-gradient(135deg, #ffeaef 0%, #fdeff9 100%); 
+            border-color: #ffacc5;
         }}
 
         .course-card.selected {{
-            background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+            background: linear-gradient(135deg, #e6f7ff 0%, #f0faff 100%); 
             border-color: #4facfe;
             box-shadow: 0 3px 10px rgba(79, 172, 254, 0.3);
         }}
@@ -432,6 +465,7 @@ class CourseSimulatorGenerator:
             background: #f1f1f1;
             border-color: #ccc;
             opacity: 0.6;
+            cursor: not-allowed;
         }}
 
         .course-header {{
@@ -447,7 +481,7 @@ class CourseSimulatorGenerator:
             font-size: 1em;
             color: #333;
             line-height: 1.3;
-            word-break: keep-all;
+            word-break: keep-all; 
             flex: 1;
         }}
 
@@ -466,17 +500,19 @@ class CourseSimulatorGenerator:
             color: #666;
             font-size: 0.8em;
             margin-bottom: 10px;
-            line-height: 1.2;
+            line-height: 1.4; 
         }}
 
         .course-checkbox {{
-            margin-top: 10px;
+            margin-top: auto; 
+            padding-top: 10px;
         }}
 
         .course-checkbox input {{
             margin-right: 8px;
             transform: scale(1.3);
             cursor: pointer;
+            vertical-align: middle; 
         }}
 
         .course-checkbox input:disabled {{
@@ -489,43 +525,55 @@ class CourseSimulatorGenerator:
             font-size: 0.9em;
             user-select: none;
             -webkit-user-select: none;
+            vertical-align: middle; 
         }}
 
-        .selection-group {{
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
+        .selection-group-wrapper {{ 
+            background: #fff9e6; 
+            border: 1px solid #ffecb3;
             border-radius: 8px;
-            padding: 12px;
+            padding: 15px;
             margin: 15px 0;
         }}
 
-        .selection-group-title {{
+        .selection-group-title {{ 
+            font-size: 1.05em; 
             font-weight: bold;
-            color: #8b4513;
+            color: #854d0e; 
             margin-bottom: 12px;
-            text-align: center;
-            font-size: 0.95em;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            padding: 8px 0;
+            border-bottom: 2px solid #ffdd80;
         }}
 
         .selection-count {{
-            background: rgba(139, 69, 19, 0.1);
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.8em;
-            color: #8b4513;
+            background: rgba(133, 77, 14, 0.1);
+            padding: 4px 10px; 
+            border-radius: 15px; 
+            font-size: 0.85em; 
+            color: #854d0e;
+            font-weight: 500;
         }}
 
-        .selection-limit-reached {{
-            background: #ffe6e6;
-            border-color: #ffb3b3;
+        .selection-group-wrapper.selection-limit-reached {{
+            background: #ffebee; 
+            border-color: #ffcdd2;
         }}
 
-        .selection-limit-reached .selection-group-title {{
-            color: #d63384;
+        .selection-group-wrapper.selection-limit-reached .selection-group-title {{
+            color: #c62828; 
+            border-bottom-color: #ef9a9a;
         }}
+        
+        .required-notice {{ 
+            color: #1b5e20; 
+            font-weight: bold;
+            margin-top: 10px;
+            font-size: 0.85em;
+        }}
+
 
         .summary {{
             position: sticky;
@@ -536,6 +584,7 @@ class CourseSimulatorGenerator:
             border-radius: 10px;
             margin-top: 20px;
             margin-bottom: 20px;
+            z-index: 10; 
         }}
 
         .summary h3 {{
@@ -621,13 +670,12 @@ class CourseSimulatorGenerator:
             }}
             
             .course-grid {{
-                grid-template-columns: 1fr;
+                grid-template-columns: 1fr; 
                 gap: 10px;
             }}
             
             .course-card {{
                 padding: 10px;
-                min-height: 100px;
             }}
             
             .course-name {{
@@ -640,7 +688,7 @@ class CourseSimulatorGenerator:
             }}
             
             .summary {{
-                position: static;
+                position: static; 
                 margin-top: 15px;
                 padding: 12px;
             }}
@@ -667,7 +715,6 @@ class CourseSimulatorGenerator:
             
             .course-card {{
                 padding: 8px;
-                min-height: 90px;
             }}
             
             .course-name {{
@@ -675,7 +722,7 @@ class CourseSimulatorGenerator:
             }}
             
             .course-checkbox input {{
-                transform: scale(1.4);
+                transform: scale(1.4); 
             }}
             
             .course-checkbox label {{
@@ -683,41 +730,21 @@ class CourseSimulatorGenerator:
             }}
         }}
 
-        /* 터치 친화적 스타일 */
         @media (pointer: coarse) {{
             .tab {{
-                min-height: 44px;
-            }}
-            
-            .course-card {{
-                min-height: 120px;
+                min-height: 44px; 
             }}
             
             .course-checkbox {{
-                padding: 5px 0;
+                padding: 8px 0; 
             }}
             
             .course-checkbox input {{
-                min-width: 20px;
-                min-height: 20px;
+                min-width: 24px; 
+                min-height: 24px;
             }}
         }}
 
-        /* 다크모드 대응 */
-        @media (prefers-color-scheme: dark) {{
-            .course-info {{
-                color: #888;
-            }}
-            
-            .selection-group {{
-                background: #2a2a2a;
-                border-color: #444;
-            }}
-            
-            .selection-group-title {{
-                color: #ffd700;
-            }}
-        }}
     </style>
 </head>
 <body>
@@ -743,70 +770,80 @@ class CourseSimulatorGenerator:
     </div>
 
     <script>
-        // 과목 데이터
         const courseData = {course_data};
+        const groupLimits = {group_limits}; // Key: "학기_선택그룹명"
         
-        // 그룹별 선택 제한 정보
-        const groupLimits = {group_limits};
-        
-        // 전역 변수
-        let selectedCourses = {{}};
-        let semesterList = [];
-        let selectionGroups = {{}};
+        let selectedCourses = {{}}; 
+        let semesterList = [];      
+        let selectionGroups = {{}}; // Key: "학기_선택그룹명", Value: {{ semester, name, limit, selected: [] }}
 
-        // 초기화
         document.addEventListener('DOMContentLoaded', function() {{
             initializeSimulator();
         }});
 
         function initializeSimulator() {{
             try {{
-                // 학기 목록 추출
-                semesterList = [...new Set(courseData.map(course => course.semester))].sort();
-                
-                // selectedCourses 초기화
+                semesterList = [...new Set(courseData.map(course => course.semester))].filter(s => s && String(s).trim() !== "").sort();
                 semesterList.forEach(semester => {{
                     selectedCourses[semester] = [];
                 }});
 
-                // 선택 그룹 초기화
-                initializeSelectionGroups();
+                initializeSelectionGroups(); 
 
-                // 탭 생성
                 generateTabs();
-                
-                // 각 학기별 콘텐츠 생성
-                generateSemesterContents();
-                
-                // 첫 번째 학기 활성화
+                generateSemesterContents(); // This will now build the new structure
+
                 if (semesterList.length > 0) {{
-                    showSemester(semesterList[0]);
+                    showSemester(semesterList[0]); 
+                }} else {{
+                    document.getElementById('semesterContents').innerHTML = '<p style="text-align:center; padding:20px;">표시할 학기 정보가 없습니다. 엑셀 파일의 학기 데이터를 확인해주세요.</p>';
+                    updateSummary(); 
                 }}
 
                 console.log('시뮬레이션 초기화 완료:', {{
                     총과목수: courseData.length,
-                    학기수: semesterList.length,
                     학기목록: semesterList,
-                    선택그룹: selectionGroups
+                    선택그룹정의_fromPython: groupLimits,
+                    활성선택그룹_JS: selectionGroups
                 }});
                 
             }} catch (error) {{
                 console.error('초기화 오류:', error);
+                alert('시뮬레이션 초기화 중 오류가 발생했습니다. 개발자 콘솔을 확인해주세요.');
             }}
         }}
 
         function initializeSelectionGroups() {{
-            selectionGroups = {{}};
+            selectionGroups = {{}}; 
+            for (const key in groupLimits) {{ // groupLimits has "학기_선택그룹명" as key
+                if (groupLimits.hasOwnProperty(key)) {{
+                    const limitInfo = groupLimits[key];
+                    selectionGroups[key] = {{ // JS selectionGroups also uses "학기_선택그룹명" as key
+                        semester: limitInfo.semester,
+                        name: limitInfo.group_name, // This is the "선택그룹명"
+                        limit: limitInfo.limit,
+                        selected: [] 
+                    }};
+                }}
+            }}
 
             courseData.forEach(course => {{
-                if (course.selection_group && course.selection_limit) {{
-                    const key = `${{course.semester}}-${{course.selection_group}}`;
-                    if (!selectionGroups[key]) {{
-                        selectionGroups[key] = {{
-                            name: course.selection_group,
-                            limit: course.selection_limit,
-                            selected: []
-                        }};
+                if (course.required === '지정') {{ 
+                    if (selectedCourses[course.semester] && !selectedCourses[course.semester].find(c => c.name === course.name)) {{
+                         selectedCourses[course.semester].push(course);
+                    }}
+                    
+                    if (course.selection_group) {{ 
+                        const sgKey = `${{course.semester}}_${{course.selection_group}}`; // "학기_선택그룹명"
+                        if (selectionGroups[sgKey]) {{
+                            if (!selectionGroups[sgKey].selected.find(c => c.name === course.name)) {{
+                                selectionGroups[sgKey].selected.push(course);
+                            }}
+                        }} else {{
+                            // This case means a course has a selection_group, but that group is not defined in groupLimits
+                            // This might happen if "그룹 내 선택수" column is missing for some courses with a selection_group name.
+                            console.warn(`선택 그룹 '${{sgKey}}' (과목: ${{course.name}})이 groupLimits에 정의되지 않았습니다. '그룹 내 선택수' 컬럼을 확인해주세요.`);
+                        }}
                     }}
                 }}
             }});
@@ -815,16 +852,15 @@ class CourseSimulatorGenerator:
         function generateTabs() {{
             const tabsContainer = document.getElementById('tabsContainer');
             tabsContainer.innerHTML = '';
-
             semesterList.forEach((semester, index) => {{
                 const tab = document.createElement('button');
                 tab.className = `tab ${{index === 0 ? 'active' : ''}}`;
                 tab.textContent = semester;
-                tab.onclick = () => showSemester(semester);
                 
-                // 터치 이벤트 추가
-                tab.addEventListener('touchstart', () => showSemester(semester));
+                const semesterString = String(semester).replace(/'/g, "\\'"); 
+                tab.setAttribute('onclick', `showSemester('${{semesterString}}')`); 
                 
+                tab.addEventListener('touchstart', (e) => {{ e.preventDefault(); showSemester(semester); }}, {{passive: false}});
                 tabsContainer.appendChild(tab);
             }});
         }}
@@ -835,343 +871,334 @@ class CourseSimulatorGenerator:
 
             semesterList.forEach((semester, index) => {{
                 const semesterDiv = document.createElement('div');
+                const safeSemesterId = String(semester).replace(/[^a-zA-Z0-9-_]/g, '');
                 semesterDiv.className = `semester-content ${{index === 0 ? 'active' : ''}}`;
-                semesterDiv.id = `semester-${{semester}}`;
+                semesterDiv.id = `semester-${{safeSemesterId}}`;
 
                 const semesterCourses = courseData.filter(course => course.semester === semester);
                 const requiredCourses = semesterCourses.filter(course => course.required === '지정');
                 const optionalCourses = semesterCourses.filter(course => course.required !== '지정');
 
-                // 학기 정보
                 const infoDiv = document.createElement('div');
                 infoDiv.className = 'semester-info';
-                infoDiv.innerHTML = `
-                    <h2>${{semester}}</h2>
-                    <p>지정과목: ${{requiredCourses.length}}개, 선택과목: ${{optionalCourses.length}}개</p>
-                `;
+                infoDiv.innerHTML = `<h2>${{semester}}</h2><p>지정과목: ${{requiredCourses.length}}개, 선택과목: ${{optionalCourses.length}}개</p>`;
                 semesterDiv.appendChild(infoDiv);
 
-                // 지정과목
+                // 1. 지정 과목 섹션
                 if (requiredCourses.length > 0) {{
                     const requiredSection = document.createElement('div');
-                    requiredSection.className = 'course-section';
-                    requiredSection.innerHTML = `
-                        <div class="section-title">📚 지정과목</div>
-                        <div class="course-grid" id="required-${{semester}}"></div>
-                    `;
+                    requiredSection.className = 'course-section'; 
+                    requiredSection.innerHTML = `<div class="section-title">📚 지정과목</div><div class="course-grid" id="required-${{safeSemesterId}}"></div>`;
                     semesterDiv.appendChild(requiredSection);
                 }}
 
-                // 선택과목 (그룹별로 구분)
-                if (optionalCourses.length > 0) {{
-                    const groups = [...new Set(optionalCourses.map(course => course.group))];
+                // 2. 선택 그룹별 과목 (선택 제한이 있는 그룹)
+                //    Iterate over selectionGroups that match the current semester
+                const processedSelectionGroupNames = new Set(); // Track processed group names to avoid duplicate wrappers
+                for (const sgKey in selectionGroups) {{
+                    if (selectionGroups.hasOwnProperty(sgKey) && selectionGroups[sgKey].semester === semester) {{
+                        const groupInfo = selectionGroups[sgKey]; // name here is the "선택그룹명"
+                        const selectionGroupName = groupInfo.name;
 
-                    groups.forEach(group => {{
-                        const groupCourses = optionalCourses.filter(course => course.group === group);
+                        if (processedSelectionGroupNames.has(selectionGroupName)) continue; // Already created a wrapper for this group name
+
+                        const safeSelectionGroupName = String(selectionGroupName).replace(/[^a-zA-Z0-9-_]/g, '');
+                        const wrapperId = `wrapper-${{safeSemesterId}}-${{safeSelectionGroupName}}`;
+                        const gridId = `grid-${{safeSemesterId}}-${{safeSelectionGroupName}}`;
+                        const countId = `count-${{safeSemesterId}}-${{safeSelectionGroupName}}`;
+
+                        const sgWrapper = document.createElement('div');
+                        sgWrapper.className = 'selection-group-wrapper';
+                        sgWrapper.id = wrapperId; 
+
+                        // Title uses the selectionGroupName. 교과(군) is not part of the main title here.
+                        sgWrapper.innerHTML = `
+                            <div class="selection-group-title">
+                                <span>🎯 ${{selectionGroupName}}</span>
+                                <span class="selection-count" id="${{countId}}">${{groupInfo.selected.length}} / ${{groupInfo.limit}}개 선택</span>
+                            </div>
+                            <div class="course-grid" id="${{gridId}}"></div>`;
+                        semesterDiv.appendChild(sgWrapper);
+                        processedSelectionGroupNames.add(selectionGroupName);
+                    }}
+                }}
+                
+                // 3. 일반 선택 과목 (선택 그룹명이 없거나, 있어도 groupLimits에 정의되지 않은 과목)
+                const generalOptionalCourses = optionalCourses.filter(course => {{
+                    if (!course.selection_group) return true; // No selection group name
+                    const sgKey = `${{course.semester}}_${{course.selection_group}}`;
+                    return !selectionGroups[sgKey]; // Selection group name exists, but not in defined selectionGroups
+                }});
+
+                if (generalOptionalCourses.length > 0) {{
+                    const 교과군들ForGeneral = [...new Set(generalOptionalCourses.map(course => course.group || '기타'))].sort();
+                    교과군들ForGeneral.forEach(교과군_이름 => {{
+                        const safe교과군 = String(교과군_이름).replace(/[^a-zA-Z0-9-_]/g, '');
+                        const sectionId = `section-general-${{safeSemesterId}}-${{safe교과군}}`;
+                        const gridId = `grid-general-${{safeSemesterId}}-${{safe교과군}}`;
                         
-                        // 선택 그룹별로 분리
-                        const selectionGroupMap = {{}};
-                        groupCourses.forEach(course => {{
-                            const groupKey = course.selection_group ? `${{semester}}-${{course.selection_group}}` : 'default';
-                            if (!selectionGroupMap[groupKey]) {{
-                                selectionGroupMap[groupKey] = [];
-                            }}
-                            selectionGroupMap[groupKey].push(course);
-                        }});
-
-                        Object.keys(selectionGroupMap).forEach(selectionGroupKey => {{
-                            const courses = selectionGroupMap[selectionGroupKey];
-                            const hasLimit = courses[0].selection_limit;
-                            
-                            const groupSection = document.createElement('div');
-                            groupSection.className = `selection-group ${{hasLimit ? 'has-limit' : ''}}`;
-                            groupSection.id = `group-${{semester}}-${{group}}-${{selectionGroupKey}}`;
-                            groupSection.dataset.semester = semester;
-                            groupSection.dataset.group = group;
-                            groupSection.dataset.selectionGroup = selectionGroupKey;
-                            
-                            let titleContent = `🎯 ${{group}} 선택과목`;
-                            if (hasLimit) {{
-                                titleContent = `🎯 ${{courses[0].selection_group}} 선택과목`;
-                            }}
-                            
-                            groupSection.innerHTML = `
-                                <div class="selection-group-title">
-                                    <span>${{titleContent}}</span>
-                                    ${{hasLimit ? `<span class="selection-count" id="count-${{semester}}-${{group}}-${{selectionGroupKey}}">0 / ${{courses[0].selection_limit}}개 선택</span>` : ''}}
-                                </div>
-                                <div class="course-grid" id="optional-${{group}}-${{selectionGroupKey}}-${{semester}}"></div>
-                            `;
-                            semesterDiv.appendChild(groupSection);
-                        }});
+                        const sectionDiv = document.createElement('div');
+                        sectionDiv.className = 'course-section';
+                        sectionDiv.id = sectionId;
+                        sectionDiv.innerHTML = `
+                            <div class="section-title">📖 ${{교과군_이름}} (일반선택)</div>
+                            <div class="course-grid" id="${{gridId}}"></div>`;
+                        semesterDiv.appendChild(sectionDiv);
                     }});
                 }}
-
                 contentsContainer.appendChild(semesterDiv);
-
-                // 지정과목 자동 선택
-                selectedCourses[semester] = [...requiredCourses];
-                // 선택 제한 그룹에 지정과목 반영
-                requiredCourses.forEach(course => {{
-                    if (course.selection_group && course.selection_limit) {{
-                        const key = `${{semester}}-${{course.selection_group}}`;
-                        if (selectionGroups[key] && !selectionGroups[key].selected.find(c => c.name === course.name)) {{
-                            selectionGroups[key].selected.push(course);
-                        }}
-                    }}
-                }});
             }});
-            // 초기 선택 제한 업데이트
-            Object.keys(selectionGroups).forEach(key => {{
-                document.querySelectorAll(`[data-selection-group="${{key}}"]`).forEach(el => {{
-                    updateSelectionLimit(el.dataset.semester, el.dataset.group, key);
-                }});
+            
+            // Initial UI update for selection limits after structure is built
+            semesterList.forEach(semester => {{
+                for (const sgKey in selectionGroups) {{
+                    if (selectionGroups.hasOwnProperty(sgKey) && selectionGroups[sgKey].semester === semester) {{
+                        const groupInfo = selectionGroups[sgKey];
+                        updateSelectionLimitUI(semester, groupInfo.name); // Pass selectionGroupName
+                    }}
+                }}
             }});
         }}
 
         function showSemester(semester) {{
-            // 모든 탭 비활성화
-            document.querySelectorAll('.tab').forEach(tab => {{
-                tab.classList.remove('active');
-                if (tab.textContent === semester) {{
-                    tab.classList.add('active');
-                }}
-            }});
-
-            // 모든 콘텐츠 숨기기
-            document.querySelectorAll('.semester-content').forEach(content => {{
-                content.classList.remove('active');
-            }});
-
-            // 선택된 학기 콘텐츠 표시
-            const semesterContent = document.getElementById(`semester-${{semester}}`);
+            const safeSemesterId = String(semester).replace(/[^a-zA-Z0-9-_]/g, '');
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+             const activeTab = Array.from(document.querySelectorAll('.tab')).find(tab => tab.textContent === semester);
+            if(activeTab) activeTab.classList.add('active');
+            
+            document.querySelectorAll('.semester-content').forEach(content => content.classList.remove('active'));
+            const semesterContent = document.getElementById(`semester-${{safeSemesterId}}`);
             if (semesterContent) {{
                 semesterContent.classList.add('active');
-                renderCourses(semester);
+                renderCourses(semester); 
             }}
+            updateSummary(); 
         }}
 
         function renderCourses(semester) {{
             const semesterCourses = courseData.filter(course => course.semester === semester);
-            const requiredCourses = semesterCourses.filter(course => course.required === '지정');
-            const optionalCourses = semesterCourses.filter(course => course.required !== '지정');
+            const safeSemesterId = String(semester).replace(/[^a-zA-Z0-9-_]/g, '');
 
-            // 지정과목 렌더링
-            const requiredContainer = document.getElementById(`required-${{semester}}`);
+            // 1. Render 지정 과목
+            const requiredContainer = document.getElementById(`required-${{safeSemesterId}}`);
             if (requiredContainer) {{
                 requiredContainer.innerHTML = '';
-                requiredCourses.forEach(course => {{
-                    requiredContainer.appendChild(createCourseCard(course, semester, true));
+                semesterCourses.filter(c => c.required === '지정').forEach(course => {{
+                    requiredContainer.appendChild(createCourseCard(course, true));
                 }});
             }}
 
-            // 선택과목 렌더링 (그룹별)
-            const groups = [...new Set(optionalCourses.map(course => course.group))];
-            groups.forEach(group => {{
-                const groupCourses = optionalCourses.filter(course => course.group === group);
-                
-                // 선택 그룹별로 분리
-                const selectionGroupMap = {{}};
-                groupCourses.forEach(course => {{
-                    const groupKey = course.selection_group ? `${{semester}}-${{course.selection_group}}` : 'default';
-                    if (!selectionGroupMap[groupKey]) {{
-                        selectionGroupMap[groupKey] = [];
-                    }}
-                    selectionGroupMap[groupKey].push(course);
-                }});
+            const optionalCourses = semesterCourses.filter(course => course.required !== '지정');
 
-                Object.keys(selectionGroupMap).forEach(selectionGroupKey => {{
-                    const courses = selectionGroupMap[selectionGroupKey];
-                    const groupContainer = document.getElementById(`optional-${{group}}-${{selectionGroupKey}}-${{semester}}`);
-                    
-                    if (groupContainer) {{
-                        groupContainer.innerHTML = '';
-                        courses.forEach(course => {{
-                            groupContainer.appendChild(createCourseCard(course, semester, false));
+            // 2. Render 과목 in 선택 그룹 (선택 제한 있는 그룹)
+            const processedSelectionGroupNames = new Set();
+            for (const sgKey in selectionGroups) {{
+                if (selectionGroups.hasOwnProperty(sgKey) && selectionGroups[sgKey].semester === semester) {{
+                    const groupInfo = selectionGroups[sgKey];
+                    const selectionGroupName = groupInfo.name;
+                    if (processedSelectionGroupNames.has(selectionGroupName)) continue;
+
+                    const safeSelectionGroupName = String(selectionGroupName).replace(/[^a-zA-Z0-9-_]/g, '');
+                    const gridId = `grid-${{safeSemesterId}}-${{safeSelectionGroupName}}`;
+                    const gridContainer = document.getElementById(gridId);
+
+                    if (gridContainer) {{
+                        gridContainer.innerHTML = '';
+                        // Find all courses for this selection group name in this semester
+                        const coursesForThisGroup = optionalCourses.filter(c => c.selection_group === selectionGroupName);
+                        coursesForThisGroup.forEach(course => {{
+                            gridContainer.appendChild(createCourseCard(course, false));
                         }});
-                        
-                        // 선택 제한 업데이트
-                        updateSelectionLimit(semester, group, selectionGroupKey);
+                        updateSelectionLimitUI(semester, selectionGroupName);
+                    }} else {{
+                        // console.warn(`선택 그룹 그리드 컨테이너 '${{gridId}}'를 찾을 수 없습니다.`);
                     }}
-                }});
-            }});
-
-            updateSummary();
-        }}
-
-        function createCourseCard(course, semester, isRequired) {{
-            const card = document.createElement('div');
-            card.className = `course-card ${{isRequired ? 'required' : ''}}`;
-            
-            const isSelected = selectedCourses[semester] && 
-                              selectedCourses[semester].some(c => c.name === course.name);
-            
-            if (isSelected) {{
-                card.classList.add('selected');
-            }}
-
-            const courseId = `course-${{course.name.replace(/[^a-zA-Z0-9가-힣]/g, '_')}}-${{semester}}`;
-            
-            // 선택 제한 확인
-            let isDisabled = false;
-            if (!isRequired && course.selection_group && course.selection_limit) {{
-                const groupKey = `${{semester}}-${{course.selection_group}}`;
-                const groupInfo = selectionGroups[groupKey];
-                if (groupInfo && groupInfo.selected.length >= groupInfo.limit && !isSelected) {{
-                    isDisabled = true;
-                    card.classList.add('disabled');
+                    processedSelectionGroupNames.add(selectionGroupName);
                 }}
             }}
+            
+            // 3. Render 일반 선택 과목
+            const generalOptionalCourses = optionalCourses.filter(course => {{
+                if (!course.selection_group) return true;
+                const sgKey = `${{course.semester}}_${{course.selection_group}}`;
+                return !selectionGroups[sgKey];
+            }});
+
+            if (generalOptionalCourses.length > 0) {{
+                const 교과군들ForGeneral = [...new Set(generalOptionalCourses.map(course => course.group || '기타'))].sort();
+                교과군들ForGeneral.forEach(교과군_이름 => {{
+                    const safe교과군 = String(교과군_이름).replace(/[^a-zA-Z0-9-_]/g, '');
+                    const gridId = `grid-general-${{safeSemesterId}}-${{safe교과군}}`;
+                    const gridContainer = document.getElementById(gridId);
+                    if (gridContainer) {{
+                        gridContainer.innerHTML = '';
+                        const coursesForThis교과군 = generalOptionalCourses.filter(c => (c.group || '기타') === 교과군_이름);
+                        coursesForThis교과군.forEach(course => {{
+                            gridContainer.appendChild(createCourseCard(course, false));
+                        }});
+                    }} else {{
+                        // console.warn(`일반 선택용 그리드 컨테이너 '${{gridId}}'를 찾을 수 없습니다.`);
+                    }}
+                }});
+            }}
+        }}
+
+        function createCourseCard(course, isRequired) {{
+            const card = document.createElement('div');
+            card.className = 'course-card';
+            if (isRequired) card.classList.add('required');
+
+            const isSelected = selectedCourses[course.semester]?.some(c => c.name === course.name);
+            if (isSelected) card.classList.add('selected');
+            
+            const safeSemester = String(course.semester).replace(/[^a-zA-Z0-9-_]/g, '');
+            const safeCourseName = String(course.name).replace(/[^a-zA-Z0-9가-힣-_]/g, '');
+            const courseId = `course-${{safeSemester}}-${{safeCourseName}}`;
+            let isDisabled = false;
+
+            if (!isRequired && course.selection_group) {{ // Check if it belongs to any selection_group
+                const sgKey = `${{course.semester}}_${{course.selection_group}}`;
+                const groupInfo = selectionGroups[sgKey]; // Check if this group is a defined limited group
+                if (groupInfo && groupInfo.selected.length >= groupInfo.limit && !isSelected) {{
+                    isDisabled = true;
+                }}
+            }}
+            if (isDisabled) card.classList.add('disabled');
+
+            let infoText = `${{course.group || '미분류'}} | ${{course.type || '정보없음'}}`;
+            // Display selection_group name if it exists, regardless of whether it's a limited group
+            if (course.selection_group) {{ 
+                 infoText += ` | 그룹: ${{course.selection_group}}`;
+            }}
+            if(course.subject) {{ 
+                infoText += ` | 담당: ${{course.subject}}`;
+            }}
+
+            const escapedSemester = String(course.semester).replace(/'/g, "\\\\'");
+            const escapedCourseName = String(course.name).replace(/'/g, "\\\\'");  
 
             card.innerHTML = `
-                <div class="course-header">
-                    <div class="course-name">${{course.name}}</div>
-                    <div class="course-credit">${{course.credits}}학점</div>
+                <div> 
+                    <div class="course-header">
+                        <div class="course-name">${{course.name}}</div>
+                        <div class="course-credit">${{course.credits}}학점</div>
+                    </div>
+                    <div class="course-info">${{infoText}}</div>
                 </div>
-                <div class="course-info">
-                    ${{course.group}} | ${{course.type}}
-                    ${{course.selection_group ? ` | ${{course.selection_group}}` : ''}}
+                <div> 
+                ${{isRequired ? `<div class="required-notice">✓ 지정과목 (자동 선택)</div>` : `
+                    <div class="course-checkbox">
+                        <input type="checkbox" id="${{courseId}}" 
+                               ${{isSelected ? 'checked' : ''}} 
+                               ${{isDisabled ? 'disabled' : ''}}
+                               onchange="toggleCourse('${{escapedSemester}}', '${{escapedCourseName}}', this)">
+                        <label for="${{courseId}}">선택</label>
+                    </div>
+                `}}
                 </div>
-                ${{!isRequired ? `
-                <div class="course-checkbox">
-                    <input type="checkbox" id="${{courseId}}" ${{isSelected ? 'checked' : ''}} 
-                           ${{isDisabled ? 'disabled' : ''}}
-                           onchange="toggleCourse('${{semester}}', '${{course.name}}', this)"
-                           ontouchstart="this.focus()">
-                    <label for="${{courseId}}">선택</label>
-                </div>
-                ` : '<div style="color: #28a745; font-weight: bold; margin-top: 10px;">✓ 지정과목</div>'}}
             `;
-
             return card;
         }}
 
         function toggleCourse(semester, courseName, checkbox) {{
-            if (!selectedCourses[semester]) {{
-                selectedCourses[semester] = [];
-            }}
+            const course = courseData.find(c => c.semester === semester && c.name === courseName);
+            if (!course) return;
 
-            const course = courseData.find(c => c.name === courseName);
-            const isCurrentlySelected = selectedCourses[semester].some(c => c.name === courseName);
+            const isCurrentlySelected = selectedCourses[semester]?.some(c => c.name === courseName);
 
-            if (checkbox.checked && !isCurrentlySelected) {{
-                // 선택 제한 확인
-                    if (course.selection_group && course.selection_limit) {{
-                        const groupKey = `${{semester}}-${{course.selection_group}}`;
-                        const groupInfo = selectionGroups[groupKey];
-                    
+            if (checkbox.checked && !isCurrentlySelected) {{ 
+                if (course.selection_group) {{ // If the course belongs to a selection_group
+                    const sgKey = `${{semester}}_${{course.selection_group}}`;
+                    const groupInfo = selectionGroups[sgKey]; // Check if it's a defined limited group
                     if (groupInfo && groupInfo.selected.length >= groupInfo.limit) {{
-                        checkbox.checked = false;
-                        alert(`${{course.selection_group}} 그룹에서는 최대 ${{groupInfo.limit}}개까지만 선택할 수 있습니다.`);
+                        checkbox.checked = false; 
+                        alert(`'${{groupInfo.name}}' 그룹은 최대 ${{groupInfo.limit}}개까지만 선택할 수 있습니다.`);
                         return;
                     }}
-                    
-                    // 선택 그룹에 추가
-                    if (groupInfo) {{
-                        groupInfo.selected.push(course);
-                    }}
+                    if (groupInfo) groupInfo.selected.push(course); // Add to selectionGroups only if it's a defined limited group
                 }}
-                
                 selectedCourses[semester].push(course);
-                checkbox.closest('.course-card').classList.add('selected');
-                
-            }} else if (!checkbox.checked && isCurrentlySelected) {{
-                // 선택 그룹에서 제거
-                if (course.selection_group && course.selection_limit) {{
-                    const groupKey = `${{semester}}-${{course.selection_group}}`;
-                    const groupInfo = selectionGroups[groupKey];
-                    
-                    if (groupInfo) {{
+            }} else if (!checkbox.checked && isCurrentlySelected) {{ 
+                if (course.selection_group) {{
+                    const sgKey = `${{semester}}_${{course.selection_group}}`;
+                    const groupInfo = selectionGroups[sgKey];
+                    if (groupInfo) {{ // Remove from selectionGroups only if it's a defined limited group
                         groupInfo.selected = groupInfo.selected.filter(c => c.name !== courseName);
                     }}
                 }}
-                
                 selectedCourses[semester] = selectedCourses[semester].filter(c => c.name !== courseName);
-                checkbox.closest('.course-card').classList.remove('selected');
             }}
-
-            // 선택 제한 UI 업데이트
-            if (course.selection_group && course.selection_limit) {{
-                const groupKey = `${{semester}}-${{course.selection_group}}`;
-                updateSelectionLimit(semester, course.group, groupKey);
-            }}
-
-            // 다른 과목들의 비활성화 상태 업데이트
-            renderCourses(semester);
             
+            checkbox.closest('.course-card').classList.toggle('selected', checkbox.checked);
+
+            if (course.selection_group) {{ 
+                 // Update UI for this specific selection group name
+                 updateSelectionLimitUI(semester, course.selection_group);
+            }}
+            
+            renderCourses(semester); // Re-render to update disabled states of other cards
             updateSummary();
         }}
 
-        function updateSelectionLimit(semester, group, selectionGroup) {{
-            const groupKey = selectionGroup;
-            const groupInfo = selectionGroups[groupKey];
+        // Updated: 교과군_이름 parameter is removed as it's not needed to identify the selection group UI elements
+        function updateSelectionLimitUI(semester, selectionGroupName) {{
+            if (!selectionGroupName) return; 
+
+            const sgDataKey = `${{semester}}_${{selectionGroupName}}`; 
+            const groupInfo = selectionGroups[sgDataKey]; // Get info for this selection group
+            if (!groupInfo) {{ // Not a defined limited group, or no limit info
+                return;
+            }}
             
-            if (!groupInfo) return;
+            const safeSemesterId = String(semester).replace(/[^a-zA-Z0-9-_]/g, '');
+            const safeSelectionGroupName = String(selectionGroupName).replace(/[^a-zA-Z0-9-_]/g, '');
             
-            const countElement = document.getElementById(`count-${{semester}}-${{group}}-${{selectionGroup}}`);
-            const groupElement = document.getElementById(`group-${{semester}}-${{group}}-${{selectionGroup}}`);
-            
+            // DOM IDs are now based on semester and selectionGroupName only
+            const countId = `count-${{safeSemesterId}}-${{safeSelectionGroupName}}`;
+            const wrapperId = `wrapper-${{safeSemesterId}}-${{safeSelectionGroupName}}`;
+
+            const countElement = document.getElementById(countId);
+            const wrapperElement = document.getElementById(wrapperId); 
+
             if (countElement) {{
-                const selectedCount = groupInfo.selected.length;
-                const limit = groupInfo.limit;
-                countElement.textContent = `${{selectedCount}} / ${{limit}}개 선택`;
-                
-                // 선택 제한 도달 시 스타일 변경
-                if (groupElement) {{
-                    if (selectedCount >= limit) {{
-                        groupElement.classList.add('selection-limit-reached');
-                    }} else {{
-                        groupElement.classList.remove('selection-limit-reached');
-                    }}
-                }}
+                countElement.textContent = `${{groupInfo.selected.length}} / ${{groupInfo.limit}}개 선택`;
+            }}
+            if (wrapperElement) {{
+                wrapperElement.classList.toggle('selection-limit-reached', groupInfo.selected.length >= groupInfo.limit);
             }}
         }}
 
         function updateSummary() {{
             const summaryList = document.getElementById('summaryList');
             const totalCreditsElement = document.getElementById('totalCredits');
-            
             summaryList.innerHTML = '';
             let totalCredits = 0;
 
             semesterList.forEach(semester => {{
                 const courses = selectedCourses[semester] || [];
                 if (courses.length > 0) {{
-                    const semesterDiv = document.createElement('div');
-                    semesterDiv.innerHTML = `<strong>${{semester}}</strong>`;
-                    semesterDiv.style.marginTop = '12px';
-                    semesterDiv.style.borderBottom = '1px solid rgba(255,255,255,0.3)';
-                    semesterDiv.style.paddingBottom = '4px';
-                    semesterDiv.style.fontSize = '0.9em';
-                    summaryList.appendChild(semesterDiv);
+                    const semesterHeader = document.createElement('div');
+                    semesterHeader.innerHTML = `<strong>${{semester}} (${{courses.length}}과목)</strong>`;
+                    semesterHeader.style.cssText = `margin-top: 10px; padding-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,0.2); font-size: 0.95em;`;
+                    if (summaryList.children.length > 0) semesterHeader.style.marginTop = '15px'; 
+                    summaryList.appendChild(semesterHeader);
 
                     courses.forEach(course => {{
-                        const courseItem = document.createElement('div');
-                        courseItem.className = 'selected-course-item';
-                        courseItem.innerHTML = `
-                            <span>${{course.name}}</span>
-                            <span>${{course.credits}}학점</span>
-                        `;
-                        summaryList.appendChild(courseItem);
-                        totalCredits += course.credits;
+                        const item = document.createElement('div');
+                        item.className = 'selected-course-item';
+                        item.innerHTML = `<span>${{course.name}}</span><span>${{course.credits}}학점</span>`;
+                        summaryList.appendChild(item);
+                        totalCredits += Number(course.credits) || 0; 
                     }});
                 }}
             }});
-
-            totalCreditsElement.textContent = `총 학점: ${{totalCredits}}학점`;
-        }}
-
-        // 모바일 터치 최적화
-        document.addEventListener('touchstart', function() {{}}, false);
-        
-        // iOS Safari 뷰포트 높이 문제 해결
-        function updateViewportHeight() {{
-            const vh = window.innerHeight * 0.01;
-            document.documentElement.style.setProperty('--vh', `${{vh}}px`);
+            totalCreditsElement.textContent = `총 선택 학점: ${{totalCredits}}학점`;
+            if (summaryList.innerHTML === '') {{
+                summaryList.innerHTML = '<p style="text-align:center; opacity:0.7; padding:10px 0;">선택된 과목이 없습니다.</p>';
+            }}
         }}
         
-        window.addEventListener('resize', updateViewportHeight);
-        updateViewportHeight();
+        document.addEventListener('touchstart', function() {{}}, {{passive: true}});
     </script>
 </body>
 </html>'''
@@ -1180,101 +1207,124 @@ def create_gui():
     """GUI 인터페이스 생성"""
     root = tk.Tk()
     root.title("과목 선택 시뮬레이션 생성기")
-    root.geometry("500x300")
-    root.configure(bg='#f0f0f0')
-    
-    # 스타일 설정
+    root.geometry("550x350") 
+    root.configure(bg='#eef2f3') 
+
     style = ttk.Style()
-    style.theme_use('clam')
-    
-    # 메인 프레임
-    main_frame = ttk.Frame(root, padding="20")
+    style.theme_use('clam') 
+    style.configure('TLabel', background='#eef2f3', font=('Helvetica', 10))
+    style.configure('TButton', font=('Helvetica', 10, 'bold'), padding=10)
+    style.configure('Accent.TButton', foreground='white', background='#5c6bc0') 
+
+    main_frame = ttk.Frame(root, padding="25 30") 
     main_frame.pack(fill=tk.BOTH, expand=True)
-    
-    # 제목
-    title_label = ttk.Label(main_frame, text="🎓 과목 선택 시뮬레이션 생성기", 
-                           font=('Arial', 16, 'bold'))
-    title_label.pack(pady=(0, 20))
-    
-    # 설명
-    desc_label = ttk.Label(main_frame, 
-                          text="엑셀 파일을 선택하여 인터랙티브한 과목 선택 시뮬레이션을 생성합니다.",
-                          font=('Arial', 10))
+
+    title_label = ttk.Label(main_frame, text="🎓 과목 선택 시뮬레이션 HTML 생성기",
+                           font=('Helvetica', 18, 'bold'), foreground='#3f51b5')
+    title_label.pack(pady=(0, 25)) 
+
+    desc_label = ttk.Label(main_frame,
+                          text="엑셀 파일을 선택하여 인터랙티브한 과목 선택 HTML을 생성합니다.\n필수 컬럼: 학기, 과목명, 학점, 지정여부, 교과(군)",
+                          justify=tk.CENTER, font=('Helvetica', 10), wraplength=450) 
     desc_label.pack(pady=(0, 30))
-    
-    # 버튼 프레임
-    button_frame = ttk.Frame(main_frame)
+
+    button_frame = ttk.Frame(main_frame, style='TFrame') 
     button_frame.pack(pady=20)
-    
-    # 파일 선택 버튼
-    select_btn = ttk.Button(button_frame, text="📁 엑셀 파일 선택", 
-                           command=lambda: process_file(root),
-                           style='Accent.TButton')
+
+    select_btn = ttk.Button(button_frame, text="📁 엑셀 파일 선택 및 변환",
+                           command=lambda: process_file(root, status_label), 
+                           style='Accent.TButton', width=30) 
     select_btn.pack(pady=10)
+
+    status_label = ttk.Label(main_frame, text="파일을 선택해주세요.",
+                            font=('Helvetica', 9), foreground='gray', justify=tk.CENTER)
+    status_label.pack(pady=(15,0), fill=tk.X, expand=True)
     
-    # 상태 라벨
-    status_label = ttk.Label(main_frame, text="파일을 선택해주세요.", 
-                            font=('Arial', 9), foreground='gray')
-    status_label.pack(pady=10)
-    
-    def process_file(parent):
-        generator = CourseSimulatorGenerator()
-        
-        # 파일 선택
-        file_path = generator.select_excel_file()
-        if not file_path:
-            return
-        
-        status_label.config(text=f"선택된 파일: {Path(file_path).name}")
-        parent.update()
-        
-        # 데이터 로드
-        if not generator.load_excel_data(file_path):
-            messagebox.showerror("오류", "엑셀 파일 로드에 실패했습니다.")
-            return
-        
-        # 데이터 처리
-        if not generator.process_data():
-            messagebox.showerror("오류", "데이터 처리에 실패했습니다.\\n필수 컬럼을 확인해주세요.")
-            return
-        
-        # HTML 생성
-        output_path = generator.generate_html()
-        if output_path:
-            result = messagebox.askyesno("완료", 
-                f"HTML 파일이 생성되었습니다!\\n\\n파일: {output_path}\\n\\n지금 열어보시겠습니까?")
-            
-            if result:
-                webbrowser.open(f"file://{os.path.abspath(output_path)}")
-        else:
-            messagebox.showerror("오류", "HTML 생성에 실패했습니다.")
-    
+    try:
+        root.eval('tk::PlaceWindow . center') 
+    except tk.TclError: 
+        pass 
     return root
+
+def process_file(parent_window, status_label_widget): 
+    generator = CourseSimulatorGenerator()
+    file_path = generator.select_excel_file()
+    if not file_path:
+        status_label_widget.config(text="파일 선택이 취소되었습니다.")
+        return
+
+    status_label_widget.config(text=f"파일 처리 중... {Path(file_path).name}")
+    parent_window.update_idletasks() 
+
+    if not generator.load_excel_data(file_path):
+        messagebox.showerror("오류", "엑셀 파일 로드에 실패했습니다.\n파일 형식이나 내용을 확인해주세요.")
+        status_label_widget.config(text="엑셀 파일 로드 실패.")
+        return
+
+    if not generator.process_data():
+        messagebox.showerror("오류", "데이터 처리에 실패했습니다.\n필수 컬럼이 모두 있는지, 데이터 형식이 올바른지 확인해주세요.\n(콘솔 로그에서 상세 오류 확인 가능)")
+        status_label_widget.config(text="데이터 처리 실패.")
+        return
+
+    output_html_path = generator.generate_html()
+    if output_html_path:
+        status_label_widget.config(text=f"성공! {Path(output_html_path).name} 생성됨")
+        result = messagebox.askyesno("완료",
+            f"HTML 파일이 성공적으로 생성되었습니다!\n\n경로: {output_html_path}\n\n지금 파일을 열어보시겠습니까?")
+        if result:
+            try:
+                url = Path(output_html_path).as_uri()
+                webbrowser.open(url)
+            except Exception as e:
+                messagebox.showwarning("파일 열기 실패", f"브라우저를 자동으로 여는데 실패했습니다.\n오류: {e}\n파일 탐색기에서 직접 열어주세요:\n{output_html_path}")
+    else:
+        messagebox.showerror("오류", "HTML 파일 생성에 실패했습니다.\n콘솔 로그에서 상세 오류를 확인해주세요.")
+        status_label_widget.config(text="HTML 생성 실패.")
+
 
 def main():
     """메인 함수"""
     print("🎓 과목 선택 시뮬레이션 HTML 생성기")
     print("=" * 50)
-    
+
     if len(sys.argv) > 1:
-        # 커맨드라인 모드
         file_path = sys.argv[1]
+        if not os.path.exists(file_path):
+            print(f"❌ 지정된 파일을 찾을 수 없습니다: {file_path}")
+            return
+
         generator = CourseSimulatorGenerator()
-        
-        if generator.load_excel_data(file_path) and generator.process_data():
+        print(f"커맨드라인 모드로 실행: {file_path}")
+        if generator.load_excel_data(file_path) and \
+           generator.process_data():
             output_path = generator.generate_html()
             if output_path:
-                print(f"\\n🎉 완료! HTML 파일: {output_path}")
+                print(f"\n🎉 완료! 생성된 HTML 파일: {output_path}")
+            else:
+                print("❌ HTML 파일 생성 실패.") 
         else:
-            print("❌ 파일 처리 실패")
+            print("❌ 파일 처리 또는 데이터 분석 실패.") 
     else:
-        # GUI 모드
         try:
             root = create_gui()
             root.mainloop()
-        except ImportError:
-            print("GUI가 지원되지 않습니다. 커맨드라인 모드를 사용하세요:")
-            print("python course_generator.py <엑셀파일경로>")
+        except ImportError: 
+            print("GUI를 실행할 수 없습니다. tkinter 라이브러리가 설치되어 있는지 확인해주세요.")
+            print("커맨드라인 모드를 사용하려면 다음 형식으로 실행하세요:")
+            print(f"python {os.path.basename(__file__)} <엑셀파일_경로>")
+        except Exception as e:
+            print(f"GUI 실행 중 예상치 못한 오류 발생: {e}")
+            try:
+                messagebox.showerror("치명적 오류", f"GUI 실행 중 오류 발생:\n{e}\n프로그램을 종료합니다.")
+            except tk.TclError: 
+                pass
 
 if __name__ == "__main__":
+    if os.name == 'nt':
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+            sys.stderr.reconfigure(encoding='utf-8')
+        except AttributeError: 
+            pass
+            
     main()
