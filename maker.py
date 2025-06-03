@@ -790,9 +790,9 @@ class CourseSimulatorGenerator:
         const courseData = {course_data};
         const groupLimits = {group_limits}; // Key: "학기_선택그룹명"
         
-        let selectedCourses = {};
+        let selectedCourses = {{}};
         let semesterList = [];
-        let selectionGroups = {}; // Key: "학기_선택그룹명", Value: { semester, name, limit, selected: [] }
+        let selectionGroups = {{}}; // Key: "학기_선택그룹명", Value: { semester, name, limit, selected: [] }
         const groupTabName = '교과군별';
         let allTabs = [];
 
@@ -880,7 +880,7 @@ class CourseSimulatorGenerator:
                 const semesterString = String(semester).replace(/'/g, "\\'"); 
                 tab.setAttribute('onclick', `showSemester('${{semesterString}}')`); 
                 
-                tab.addEventListener('touchstart', (e) => { e.preventDefault(); showSemester(semester); }, {passive: false});
+                tab.addEventListener('touchstart', (e) => { e.preventDefault(); showSemester(semester); }, {{passive: false}});
                 tabsContainer.appendChild(tab);
             });
         }}
@@ -1081,7 +1081,7 @@ class CourseSimulatorGenerator:
             const container = document.getElementById('groupSummary');
             if (!container) return;
             container.innerHTML = '';
-            const groupMap = {};
+            const groupMap = {{}};
             semesterList.forEach(sem => {
                 (selectedCourses[sem] || []).forEach(course => {
                     const g = course.group || '기타';
