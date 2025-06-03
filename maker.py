@@ -870,10 +870,10 @@ class CourseSimulatorGenerator:
 
                 // 선택과목 (그룹별로 구분)
                 if (optionalCourses.length > 0) {{
-                    const groups = [...new Set(optionalCourses.map(course => course.required))];
-                    
+                    const groups = [...new Set(optionalCourses.map(course => course.group))];
+
                     groups.forEach(group => {{
-                        const groupCourses = optionalCourses.filter(course => course.required === group);
+                        const groupCourses = optionalCourses.filter(course => course.group === group);
                         
                         // 선택 그룹별로 분리
                         const selectionGroupMap = {{}};
@@ -967,9 +967,9 @@ class CourseSimulatorGenerator:
             }}
 
             // 선택과목 렌더링 (그룹별)
-            const groups = [...new Set(optionalCourses.map(course => course.required))];
+            const groups = [...new Set(optionalCourses.map(course => course.group))];
             groups.forEach(group => {{
-                const groupCourses = optionalCourses.filter(course => course.required === group);
+                const groupCourses = optionalCourses.filter(course => course.group === group);
                 
                 // 선택 그룹별로 분리
                 const selectionGroupMap = {{}};
