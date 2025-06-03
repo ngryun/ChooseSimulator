@@ -972,13 +972,13 @@ class CourseSimulatorGenerator:
                 
                 // 선택 그룹별로 분리
                 const selectionGroupMap = {{}};
-                groupCourses.forEach(course => {
-                    const groupKey = course.selection_group ? `${semester}-${course.selection_group}` : 'default';
-                    if (!selectionGroupMap[groupKey]) {
+                groupCourses.forEach(course => {{
+                    const groupKey = course.selection_group ? `${{semester}}-${{course.selection_group}}` : 'default';
+                    if (!selectionGroupMap[groupKey]) {{
                         selectionGroupMap[groupKey] = [];
-                    }
+                    }}
                     selectionGroupMap[groupKey].push(course);
-                });
+                }});
 
                 Object.keys(selectionGroupMap).forEach(selectionGroupKey => {{
                     const courses = selectionGroupMap[selectionGroupKey];
