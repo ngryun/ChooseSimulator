@@ -639,6 +639,22 @@ class CourseSimulatorGenerator:
             border-radius: 5px;
         }}
 
+        .group-credits {{
+            margin-top: 10px;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }}
+
+        .group-summary-title {{
+            font-weight: bold;
+            margin-top: 15px;
+            margin-bottom: 5px;
+        }}
+
+        .group-summary-section {{
+            margin-bottom: 10px;
+        }}
+
         /* 모바일 최적화 */
         @media (max-width: 768px) {{
             body {{
@@ -766,6 +782,7 @@ class CourseSimulatorGenerator:
             <h3>📋 선택 현황 요약</h3>
             <div class="selected-courses" id="summaryList"></div>
             <div class="total-credits" id="totalCredits">총 학점: 0학점</div>
+            <div class="group-credits" id="groupCredits"></div>
         </div>
     </div>
 
@@ -773,9 +790,11 @@ class CourseSimulatorGenerator:
         const courseData = {course_data};
         const groupLimits = {group_limits}; // Key: "학기_선택그룹명"
         
-        let selectedCourses = {{}}; 
-        let semesterList = [];      
-        let selectionGroups = {{}}; // Key: "학기_선택그룹명", Value: {{ semester, name, limit, selected: [] }}
+        let selectedCourses = {};
+        let semesterList = [];
+        let selectionGroups = {}; // Key: "학기_선택그룹명", Value: { semester, name, limit, selected: [] }
+        const groupTabName = '교과군별';
+        let allTabs = [];
 
         document.addEventListener('DOMContentLoaded', function() {{
             initializeSimulator();
@@ -784,9 +803,10 @@ class CourseSimulatorGenerator:
         function initializeSimulator() {{
             try {{
                 semesterList = [...new Set(courseData.map(course => course.semester))].filter(s => s && String(s).trim() !== "").sort();
-                semesterList.forEach(semester => {{
+                semesterList.forEach(semester => {
                     selectedCourses[semester] = [];
-                }});
+                });
+                allTabs = [...semesterList, groupTabName];
 
                 initializeSelectionGroups(); 
 
@@ -852,7 +872,7 @@ class CourseSimulatorGenerator:
         function generateTabs() {{
             const tabsContainer = document.getElementById('tabsContainer');
             tabsContainer.innerHTML = '';
-            semesterList.forEach((semester, index) => {{
+            allTabs.forEach((semester, index) => {
                 const tab = document.createElement('button');
                 tab.className = `tab ${{index === 0 ? 'active' : ''}}`;
                 tab.textContent = semester;
@@ -860,9 +880,9 @@ class CourseSimulatorGenerator:
                 const semesterString = String(semester).replace(/'/g, "\\'"); 
                 tab.setAttribute('onclick', `showSemester('${{semesterString}}')`); 
                 
-                tab.addEventListener('touchstart', (e) => {{ e.preventDefault(); showSemester(semester); }}, {{passive: false}});
+                tab.addEventListener('touchstart', (e) => { e.preventDefault(); showSemester(semester); }, {passive: false});
                 tabsContainer.appendChild(tab);
-            }});
+            });
         }}
 
         function generateSemesterContents() {{
@@ -948,6 +968,11 @@ class CourseSimulatorGenerator:
                 }}
                 contentsContainer.appendChild(semesterDiv);
             }});
+            const groupDiv = document.createElement('div');
+            groupDiv.className = "semester-content";
+            groupDiv.id = "semester-group";
+            groupDiv.innerHTML = "<div id=\"groupSummary\"></div>";
+            contentsContainer.appendChild(groupDiv);
             
             // Initial UI update for selection limits after structure is built
             semesterList.forEach(semester => {{
@@ -963,16 +988,24 @@ class CourseSimulatorGenerator:
         function showSemester(semester) {{
             const safeSemesterId = String(semester).replace(/[^a-zA-Z0-9-_]/g, '');
             document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
-             const activeTab = Array.from(document.querySelectorAll('.tab')).find(tab => tab.textContent === semester);
+            const activeTab = Array.from(document.querySelectorAll('.tab')).find(tab => tab.textContent === semester);
             if(activeTab) activeTab.classList.add('active');
-            
+
             document.querySelectorAll('.semester-content').forEach(content => content.classList.remove('active'));
-            const semesterContent = document.getElementById(`semester-${{safeSemesterId}}`);
-            if (semesterContent) {{
-                semesterContent.classList.add('active');
-                renderCourses(semester); 
+            if (semester === groupTabName) {{
+                const groupContent = document.getElementById('semester-group');
+                if(groupContent) {{
+                    groupContent.classList.add('active');
+                    renderGroupSummary();
+                }}
+            }} else {{
+                const semesterContent = document.getElementById(`semester-${{safeSemesterId}}`);
+                if (semesterContent) {{
+                    semesterContent.classList.add('active');
+                    renderCourses(semester);
+                }}
             }}
-            updateSummary(); 
+            updateSummary();
         }}
 
         function renderCourses(semester) {{
@@ -1042,6 +1075,42 @@ class CourseSimulatorGenerator:
                 }});
             }}
         }}
+
+
+        function renderGroupSummary() {
+            const container = document.getElementById('groupSummary');
+            if (!container) return;
+            container.innerHTML = '';
+            const groupMap = {};
+            semesterList.forEach(sem => {
+                (selectedCourses[sem] || []).forEach(course => {
+                    const g = course.group || '기타';
+                    if (!groupMap[g]) groupMap[g] = [];
+                    groupMap[g].push(course);
+                });
+            });
+            const groups = Object.keys(groupMap).sort();
+            if (groups.length === 0) {
+                container.innerHTML = '<p style="text-align:center; opacity:0.7;">선택된 과목이 없습니다.</p>';
+                return;
+            }
+            groups.forEach(g => {
+                const section = document.createElement('div');
+                section.className = 'group-summary-section';
+                const total = groupMap[g].reduce((s,c) => s + (Number(c.credits) || 0), 0);
+                const title = document.createElement('div');
+                title.className = 'group-summary-title';
+                title.textContent = `📚 ${g} - ${total}학점`;
+                section.appendChild(title);
+                groupMap[g].forEach(course => {
+                    const item = document.createElement('div');
+                    item.className = 'selected-course-item';
+                    item.innerHTML = `<span>${course.name}</span><span>${course.credits}학점</span>`;
+                    section.appendChild(item);
+                });
+                container.appendChild(section);
+            });
+        }
 
         function createCourseCard(course, isRequired) {{
             const card = document.createElement('div');
@@ -1171,8 +1240,11 @@ class CourseSimulatorGenerator:
         function updateSummary() {{
             const summaryList = document.getElementById('summaryList');
             const totalCreditsElement = document.getElementById('totalCredits');
+            const groupCreditsElement = document.getElementById('groupCredits');
             summaryList.innerHTML = '';
+            if (groupCreditsElement) groupCreditsElement.innerHTML = '';
             let totalCredits = 0;
+            const groupTotals = {{}};
 
             semesterList.forEach(semester => {{
                 const courses = selectedCourses[semester] || [];
@@ -1188,11 +1260,20 @@ class CourseSimulatorGenerator:
                         item.className = 'selected-course-item';
                         item.innerHTML = `<span>${{course.name}}</span><span>${{course.credits}}학점</span>`;
                         summaryList.appendChild(item);
-                        totalCredits += Number(course.credits) || 0; 
+                        totalCredits += Number(course.credits) || 0;
+                        const gName = course.group || '기타';
+                        groupTotals[gName] = (groupTotals[gName] || 0) + (Number(course.credits) || 0);
                     }});
                 }}
             }});
             totalCreditsElement.textContent = `총 선택 학점: ${{totalCredits}}학점`;
+            if (groupCreditsElement) {
+                Object.keys(groupTotals).sort().forEach(g => {
+                    const div = document.createElement('div');
+                    div.textContent = `${g}: ${groupTotals[g]}학점`;
+                    groupCreditsElement.appendChild(div);
+                });
+            }
             if (summaryList.innerHTML === '') {{
                 summaryList.innerHTML = '<p style="text-align:center; opacity:0.7; padding:10px 0;">선택된 과목이 없습니다.</p>';
             }}
