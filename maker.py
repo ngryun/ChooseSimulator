@@ -803,9 +803,9 @@ class CourseSimulatorGenerator:
         function initializeSimulator() {{
             try {{
                 semesterList = [...new Set(courseData.map(course => course.semester))].filter(s => s && String(s).trim() !== "").sort();
-                semesterList.forEach(semester => {
+                semesterList.forEach(semester => {{
                     selectedCourses[semester] = [];
-                });
+                }});
                 allTabs = [...semesterList, groupTabName];
 
                 initializeSelectionGroups(); 
@@ -872,7 +872,7 @@ class CourseSimulatorGenerator:
         function generateTabs() {{
             const tabsContainer = document.getElementById('tabsContainer');
             tabsContainer.innerHTML = '';
-            allTabs.forEach((semester, index) => {
+            allTabs.forEach((semester, index) => {{
                 const tab = document.createElement('button');
                 tab.className = `tab ${{index === 0 ? 'active' : ''}}`;
                 tab.textContent = semester;
@@ -880,9 +880,9 @@ class CourseSimulatorGenerator:
                 const semesterString = String(semester).replace(/'/g, "\\'"); 
                 tab.setAttribute('onclick', `showSemester('${{semesterString}}')`); 
                 
-                tab.addEventListener('touchstart', (e) => { e.preventDefault(); showSemester(semester); }, {{passive: false}});
+                tab.addEventListener('touchstart', (e) => {{ e.preventDefault(); showSemester(semester); }}, {{passive: false}});
                 tabsContainer.appendChild(tab);
-            });
+            }});
         }}
 
         function generateSemesterContents() {{
@@ -1077,40 +1077,40 @@ class CourseSimulatorGenerator:
         }}
 
 
-        function renderGroupSummary() {
+        function renderGroupSummary() {{
             const container = document.getElementById('groupSummary');
             if (!container) return;
             container.innerHTML = '';
             const groupMap = {{}};
-            semesterList.forEach(sem => {
-                (selectedCourses[sem] || []).forEach(course => {
+            semesterList.forEach(sem => {{
+                (selectedCourses[sem] || []).forEach(course => {{
                     const g = course.group || '기타';
                     if (!groupMap[g]) groupMap[g] = [];
                     groupMap[g].push(course);
-                });
-            });
+                }});
+            }});
             const groups = Object.keys(groupMap).sort();
-            if (groups.length === 0) {
+            if (groups.length === 0) {{
                 container.innerHTML = '<p style="text-align:center; opacity:0.7;">선택된 과목이 없습니다.</p>';
                 return;
-            }
-            groups.forEach(g => {
+            }}
+            groups.forEach(g => {{
                 const section = document.createElement('div');
                 section.className = 'group-summary-section';
                 const total = groupMap[g].reduce((s,c) => s + (Number(c.credits) || 0), 0);
                 const title = document.createElement('div');
                 title.className = 'group-summary-title';
-                title.textContent = `📚 ${g} - ${total}학점`;
+                title.textContent = `📚 ${{g}} - ${{total}}학점`;
                 section.appendChild(title);
-                groupMap[g].forEach(course => {
+                groupMap[g].forEach(course => {{
                     const item = document.createElement('div');
                     item.className = 'selected-course-item';
-                    item.innerHTML = `<span>${course.name}</span><span>${course.credits}학점</span>`;
+                    item.innerHTML = `<span>${{course.name}}</span><span>${{course.credits}}학점</span>`;
                     section.appendChild(item);
-                });
+                }});
                 container.appendChild(section);
-            });
-        }
+            }});
+        }}
 
         function createCourseCard(course, isRequired) {{
             const card = document.createElement('div');
@@ -1267,13 +1267,13 @@ class CourseSimulatorGenerator:
                 }}
             }});
             totalCreditsElement.textContent = `총 선택 학점: ${{totalCredits}}학점`;
-            if (groupCreditsElement) {
-                Object.keys(groupTotals).sort().forEach(g => {
+            if (groupCreditsElement) {{
+                Object.keys(groupTotals).sort().forEach(g => {{
                     const div = document.createElement('div');
-                    div.textContent = `${g}: ${groupTotals[g]}학점`;
+                    div.textContent = `${{g}}: ${{groupTotals[g]}}학점`;
                     groupCreditsElement.appendChild(div);
-                });
-            }
+                }});
+            }}
             if (summaryList.innerHTML === '') {{
                 summaryList.innerHTML = '<p style="text-align:center; opacity:0.7; padding:10px 0;">선택된 과목이 없습니다.</p>';
             }}
