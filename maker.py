@@ -289,6 +289,8 @@ class CourseSimulatorGenerator:
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>{school_name} 과목 선택 시뮬레이션</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         * {{ /* CSS uses single braces, Python .format() needs these escaped if they are not for JS template literals */
             margin: 0;
@@ -574,7 +576,6 @@ class CourseSimulatorGenerator:
             font-size: 0.85em;
         }}
 
-
         .summary {{
             position: sticky;
             top: 10px;
@@ -637,6 +638,38 @@ class CourseSimulatorGenerator:
             padding: 8px;
             background: rgba(255,255,255,0.1);
             border-radius: 5px;
+        }}
+
+        .export-button {{
+            background: linear-gradient(135deg, #ff6b35 0%, #ff8e35 100%);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.95em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 15px;
+            width: 100%;
+            box-shadow: 0 2px 8px rgba(255, 107, 53, 0.3);
+        }}
+
+        .export-button:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
+            background: linear-gradient(135deg, #ff8e35 0%, #ff6b35 100%);
+        }}
+
+        .export-button:active {{
+            transform: translateY(0);
+        }}
+
+        .export-button:disabled {{
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
         }}
 
         /* 모바일 최적화 */
@@ -766,6 +799,9 @@ class CourseSimulatorGenerator:
             <h3>📋 선택 현황 요약</h3>
             <div class="selected-courses" id="summaryList"></div>
             <div class="total-credits" id="totalCredits">총 학점: 0학점</div>
+            <button class="export-button" onclick="exportToPDF()" id="exportBtn">
+                📄 PDF로 내보내기
+            </button>
         </div>
     </div>
 
@@ -1171,12 +1207,16 @@ class CourseSimulatorGenerator:
         function updateSummary() {{
             const summaryList = document.getElementById('summaryList');
             const totalCreditsElement = document.getElementById('totalCredits');
+            const exportBtn = document.getElementById('exportBtn');
+            
             summaryList.innerHTML = '';
             let totalCredits = 0;
+            let hasSelectedCourses = false;
 
             semesterList.forEach(semester => {{
                 const courses = selectedCourses[semester] || [];
                 if (courses.length > 0) {{
+                    hasSelectedCourses = true;
                     const semesterHeader = document.createElement('div');
                     semesterHeader.innerHTML = `<strong>${{semester}} (${{courses.length}}과목)</strong>`;
                     semesterHeader.style.cssText = `margin-top: 10px; padding-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,0.2); font-size: 0.95em;`;
@@ -1192,9 +1232,246 @@ class CourseSimulatorGenerator:
                     }});
                 }}
             }});
+            
             totalCreditsElement.textContent = `총 선택 학점: ${{totalCredits}}학점`;
+            
             if (summaryList.innerHTML === '') {{
                 summaryList.innerHTML = '<p style="text-align:center; opacity:0.7; padding:10px 0;">선택된 과목이 없습니다.</p>';
+            }}
+
+            // Enable/disable export button based on selected courses
+            exportBtn.disabled = !hasSelectedCourses;
+        }}
+
+        function exportToPDF() {{
+            try {{
+                // Check if required libraries are available
+                if (typeof window.jspdf === 'undefined' || typeof html2canvas === 'undefined') {{
+                    alert('PDF 생성 라이브러리를 로드할 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+                    return;
+                }}
+
+                // Get student information
+                const studentNumber = prompt('학번을 입력하세요:');
+                if (!studentNumber || !studentNumber.trim()) {{
+                    alert('학번을 입력해야 합니다.');
+                    return;
+                }}
+
+                const studentName = prompt('이름을 입력하세요:');
+                if (!studentName || !studentName.trim()) {{
+                    alert('이름을 입력해야 합니다.');
+                    return;
+                }}
+
+                // Show loading message
+                const exportBtn = document.getElementById('exportBtn');
+                const originalText = exportBtn.textContent;
+                exportBtn.textContent = '📄 PDF 생성 중...';
+                exportBtn.disabled = true;
+
+                // 선택된 과목을 교과(군)별로 정리
+                const coursesByGroup = {{}};
+                let totalSelectedCredits = 0;
+
+                semesterList.forEach(semester => {{
+                    const courses = selectedCourses[semester] || [];
+                    courses.forEach(course => {{
+                        const groupName = course.group || '기타';
+                        if (!coursesByGroup[groupName]) {{
+                            coursesByGroup[groupName] = [];
+                        }}
+                        coursesByGroup[groupName].push({{
+                            ...course,
+                            semester: semester
+                        }});
+                        totalSelectedCredits += Number(course.credits) || 0;
+                    }});
+                }});
+
+                if (Object.keys(coursesByGroup).length === 0) {{
+                    alert('선택된 과목이 없습니다.');
+                    exportBtn.textContent = originalText;
+                    exportBtn.disabled = false;
+                    return;
+                }}
+
+                // Create a temporary div with the report content
+                const reportDiv = document.createElement('div');
+                reportDiv.style.cssText = `
+                    position: fixed; 
+                    top: -9999px; 
+                    left: 0; 
+                    width: 800px; 
+                    background: white; 
+                    padding: 40px; 
+                    font-family: 'Malgun Gothic', '맑은 고딕', Arial, sans-serif;
+                    color: #333;
+                    line-height: 1.6;
+                `;
+
+                // Build the HTML content
+                const schoolName = '{school_name}';
+                const today = new Date().toLocaleDateString('ko-KR');
+                const sortedGroups = Object.keys(coursesByGroup).sort();
+                const totalCourses = Object.values(coursesByGroup).flat().length;
+
+                let htmlContent = `
+                    <div style="text-align: center; margin-bottom: 40px;">
+                        <h1 style="font-size: 28px; margin-bottom: 10px; color: #2c3e50;">${{schoolName}}</h1>
+                        <h2 style="font-size: 22px; margin-bottom: 20px; color: #34495e;">과목 선택 계획서</h2>
+                        <div style="font-size: 16px; margin-bottom: 10px;">
+                            <strong>학번:</strong> ${{studentNumber.trim()}} &nbsp;&nbsp;&nbsp; 
+                            <strong>이름:</strong> ${{studentName.trim()}}
+                        </div>
+                        <p style="font-size: 14px; color: #7f8c8d;">생성 날짜: ${{today}}</p>
+                    </div>
+                    
+                    <div style="margin-bottom: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+                        <h3 style="font-size: 18px; margin-bottom: 15px; color: #2c3e50;">📊 선택 결과 요약</h3>
+                        <div style="display: flex; justify-content: space-around; text-align: center;">
+                            <div>
+                                <div style="font-size: 24px; font-weight: bold; color: #e74c3c;">${{totalSelectedCredits}}</div>
+                                <div style="font-size: 14px; color: #7f8c8d;">총 학점</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 24px; font-weight: bold; color: #3498db;">${{totalCourses}}</div>
+                                <div style="font-size: 14px; color: #7f8c8d;">총 과목 수</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 24px; font-weight: bold; color: #27ae60;">${{sortedGroups.length}}</div>
+                                <div style="font-size: 14px; color: #7f8c8d;">교과(군) 수</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 style="font-size: 20px; margin-bottom: 25px; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px;">📚 교과(군)별 선택 과목</h3>
+                `;
+
+                sortedGroups.forEach(groupName => {{
+                    const groupCourses = coursesByGroup[groupName];
+                    const groupCredits = groupCourses.reduce((sum, course) => sum + (Number(course.credits) || 0), 0);
+
+                    htmlContent += `
+                        <div style="margin-bottom: 30px; border: 1px solid #ddd; border-radius: 8px; overflow: hidden;">
+                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px;">
+                                <h4 style="margin: 0; font-size: 18px; font-weight: bold;">${{groupName}} (총 ${{groupCredits}}학점)</h4>
+                            </div>
+                            <div style="padding: 20px;">
+                                <table style="width: 100%; border-collapse: collapse;">
+                                    <thead>
+                                        <tr style="background: #f8f9fa;">
+                                            <th style="padding: 12px; border: 1px solid #dee2e6; text-align: left; font-weight: bold;">과목명</th>
+                                            <th style="padding: 12px; border: 1px solid #dee2e6; text-align: center; font-weight: bold; width: 100px;">유형</th>
+                                            <th style="padding: 12px; border: 1px solid #dee2e6; text-align: center; font-weight: bold; width: 80px;">학점</th>
+                                            <th style="padding: 12px; border: 1px solid #dee2e6; text-align: center; font-weight: bold; width: 100px;">학기</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                    `;
+
+                    groupCourses.forEach((course, index) => {{
+                        const bgColor = index % 2 === 0 ? 'white' : '#f8f9fa';
+                        const courseType = course.type || '미분류';
+                        
+                        // 유형별 색상 지정
+                        let typeColor = '#6c757d'; // 기본 색상
+                        if (courseType.includes('공통')) typeColor = '#28a745';
+                        else if (courseType.includes('일반선택')) typeColor = '#007bff';
+                        else if (courseType.includes('진로선택')) typeColor = '#fd7e14';
+                        else if (courseType.includes('융합선택')) typeColor = '#6f42c1';
+                        
+                        htmlContent += `
+                            <tr style="background: ${{bgColor}};">
+                                <td style="padding: 12px; border: 1px solid #dee2e6;">${{course.name}}</td>
+                                <td style="padding: 12px; border: 1px solid #dee2e6; text-align: center;">
+                                    <span style="background: ${{typeColor}}; color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold;">
+                                        ${{courseType}}
+                                    </span>
+                                </td>
+                                <td style="padding: 12px; border: 1px solid #dee2e6; text-align: center; font-weight: bold; color: #e74c3c;">${{course.credits}}</td>
+                                <td style="padding: 12px; border: 1px solid #dee2e6; text-align: center;">${{course.semester}}</td>
+                            </tr>
+                        `;
+                    }});
+
+                    htmlContent += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    `;
+                }});
+
+                reportDiv.innerHTML = htmlContent;
+                document.body.appendChild(reportDiv);
+
+                // Generate PDF using html2canvas + jsPDF
+                html2canvas(reportDiv, {{
+                    scale: 2,
+                    useCORS: true,
+                    allowTaint: true,
+                    backgroundColor: '#ffffff',
+                    width: 800,
+                    height: reportDiv.scrollHeight
+                }}).then(canvas => {{
+                    const imgData = canvas.toDataURL('image/png');
+                    
+                    const {{ jsPDF }} = window.jspdf;
+                    const pdf = new jsPDF({{
+                        orientation: 'portrait',
+                        unit: 'mm',
+                        format: 'a4'
+                    }});
+
+                    const imgWidth = 190; // A4 width minus margins
+                    const pageHeight = 277; // A4 height minus margins
+                    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                    let heightLeft = imgHeight;
+                    let position = 10;
+
+                    // Add first page
+                    pdf.addImage(imgData, 'PNG', 10, position, imgWidth, imgHeight);
+                    heightLeft -= pageHeight;
+
+                    // Add additional pages if needed
+                    while (heightLeft >= 0) {{
+                        position = heightLeft - imgHeight + 10;
+                        pdf.addPage();
+                        pdf.addImage(imgData, 'PNG', 10, position, imgWidth, imgHeight);
+                        heightLeft -= pageHeight;
+                    }}
+
+                    // Clean up
+                    document.body.removeChild(reportDiv);
+
+                    // Generate filename with student info
+                    const safeStudentNumber = studentNumber.trim().replace(/[^a-zA-Z0-9가-힣]/g, '');
+                    const safeStudentName = studentName.trim().replace(/[^a-zA-Z0-9가-힣]/g, '');
+                    const filename = `${{safeStudentNumber}}_${{safeStudentName}}_과목선택계획서.pdf`;
+                    
+                    pdf.save(filename);
+                    
+                    // Reset button
+                    exportBtn.textContent = originalText;
+                    exportBtn.disabled = false;
+                    
+                    alert(`PDF 파일이 다운로드되었습니다: ${{filename}}`);
+                    
+                }}).catch(error => {{
+                    console.error('PDF 생성 오류:', error);
+                    document.body.removeChild(reportDiv);
+                    exportBtn.textContent = originalText;
+                    exportBtn.disabled = false;
+                    alert(`PDF 생성 중 오류가 발생했습니다: ${{error.message}}`);
+                }});
+
+            }} catch (error) {{
+                console.error('PDF 생성 오류:', error);
+                const exportBtn = document.getElementById('exportBtn');
+                exportBtn.textContent = '📄 PDF로 내보내기';
+                exportBtn.disabled = false;
+                alert(`PDF 생성 중 오류가 발생했습니다: ${{error.message}}`);
             }}
         }}
         
