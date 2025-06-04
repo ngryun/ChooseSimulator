@@ -792,7 +792,7 @@ class CourseSimulatorGenerator:
         
         let selectedCourses = {{}};
         let semesterList = [];
-        let selectionGroups = {{}}; // Key: "학기_선택그룹명", Value: { semester, name, limit, selected: [] }
+        let selectionGroups = {{}}; // Key: "학기_선택그룹명", Value: {{ semester, name, limit, selected: [] }}
         const groupTabName = '교과군별';
         let allTabs = [];
 
